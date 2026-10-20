@@ -1,7 +1,8 @@
 // The catalog page: paste a GitHub URL, of a repository or of an organization, the skills fill the
 // catalog; a card opens its skill.
 // A repository's skills arrive one by one, as the server reads them; an organization's repositories
-// too, each with its skills. The page is all there while a scan goes on: more scans, the filter, a skill.
+// too, each with its skills, and before them how far listing its repositories has got. The page is
+// all there while a scan goes on: more scans, the filter, a skill.
 // Nothing is stored: the scanned URLs live in the address, `?repo=<url>`, the open skill in
 // `#in=<entry's source>&skill=<id>`: the same skill can be in two entries, at two commits.
 // spec/web.md.
@@ -11,7 +12,9 @@
 /** @typedef {{ source: string, ref: string, repository: { id: string, url: string, commit: string },
  *   skills: Skill[], warnings: string[], error?: string, reading?: boolean }} Scan */
 /** @typedef {{ source: string, owner: { id: string, url: string }, listed: number, repositories: Scan[],
- *   warnings: string[], scanning?: number, scanned?: number }} OrganizationScan */
+ *   warnings: string[], scanning?: number, scanned?: number, listing?: Listing }} OrganizationScan */
+/** While an organization's repositories are listed, before any is scanned: how many so far, then the
+ * SKILL.md files code search found so far. @typedef {{ repositories: number, search?: { found: number, total: number } }} Listing */
 /** @typedef {{ key: string, scan?: Scan | OrganizationScan, loading: boolean, controller?: AbortController }} Entry */
 
 const $ = (id) => document.getElementById(id);
@@ -124,7 +127,10 @@ async function readLines(response, show) {
   const take = (line) => {
     const message = JSON.parse(line);
     if (message.type === 'error') throw new Error(message.error);
-    if (message.type === 'organization') {
+    if (message.type === 'listing') {
+      const { source, owner, repositories, search } = message;
+      scan = { source, owner, listed: repositories, repositories: [], warnings: [], listing: { repositories, search } };
+    } else if (message.type === 'organization') {
       const { source, owner, listed, scanning } = message;
       scan = { source, owner, listed, repositories: [], warnings: [], scanning, scanned: 0 };
     } else if (message.type === 'opened') {
@@ -280,22 +286,49 @@ function renderEntry(entry) {
   return renderRepository(scan, scan.source, entry);
 }
 
-/** An organization: its repositories with skills, each as a repository of its own, removed together. */
+/**
+ * An organization: its repositories with skills, each as a repository of its own, removed together.
+ * While its repositories are listed, how far that has got; while they are scanned, how many are done.
+ */
 function renderOrganization(entry, scan) {
   const skills = scan.repositories.reduce((sum, repository) => sum + repository.skills.length, 0);
+  const { listing } = scan;
+  const scanning = entry.loading && !listing && scan.scanning !== undefined;
   return h('section', { class: 'organization', 'data-organization': scan.owner.id, 'aria-busy': entry.loading ? 'true' : undefined },
     h('div', { class: 'repository-head organization-head' },
       h('h2', { class: 'repository-name organization-name' },
         h('a', { href: scan.source, target: '_blank', rel: 'noopener noreferrer' }, scan.owner.id)),
-      h('span', { class: 'badge' }, organizationSummary(skills, scan.repositories.length, scan.listed)),
-      entry.loading && scan.scanning !== undefined && h('span', { class: 'badge badge-muted', 'data-progress': '' },
-        `scanned ${scan.scanned} of ${scan.scanning}`),
+      !listing && h('span', { class: 'badge' }, organizationSummary(skills, scan.repositories.length, scan.listed)),
+      scanning && h('span', { class: 'badge badge-muted', 'data-progress': '' }, `scanned ${scan.scanned} of ${scan.scanning}`),
       entry.loading && h('span', { class: 'spinner', 'aria-label': 'Scanning' }),
       removeButton(entry, scan.owner.id)),
+    listing && entry.loading && renderListing(listing),
+    // The badge says it already: the bar's text is for screen readers only.
+    scanning && scan.scanning > 0 && progressBar(`Scanned ${scan.scanned} of ${scan.scanning} repositories`, scan.scanned, scan.scanning, false),
     renderWarnings(scan.warnings, scan.source),
     scan.repositories.length > 0
       ? scan.repositories.map((repository) => renderRepository(repository, scan.source))
-      : h('p', { class: 'muted' }, entry.loading ? 'Scanning its repositories…' : 'No skills in its repositories.'));
+      : !listing && h('p', { class: 'muted' }, entry.loading ? 'Scanning its repositories…' : 'No skills in its repositories.'));
+}
+
+/**
+ * How far listing an organization's repositories has got: GitHub gives them 100 at a time, and code
+ * search its SKILL.md files 100 at a time, so a large organization takes a while before any is scanned.
+ * @param {Listing} listing
+ */
+function renderListing({ repositories, search }) {
+  const listed = `${repositories} ${repositories === 1 ? 'repository' : 'repositories'}`;
+  if (!search) return progressBar(repositories ? `Listing its repositories… ${listed} so far` : 'Listing its repositories…');
+  return progressBar(`${listed} listed. Searching them for SKILL.md files… ${search.found} of ${search.total} found`,
+    search.found, search.total);
+}
+
+/** A step and its bar; without a total, a bar that only says something is going on. */
+function progressBar(text, value, max, shown = true) {
+  const known = max !== undefined && max > 0;
+  return h('div', { class: 'progress', role: 'status', 'data-progress-bar': '' },
+    shown && h('span', { class: 'progress-text' }, text),
+    h('progress', { class: 'progress-bar', 'aria-label': text, value: known ? value : undefined, max: known ? max : undefined }));
 }
 
 /** `N skills in M of K repositories`, as the CLI says it. */

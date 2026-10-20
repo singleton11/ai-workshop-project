@@ -24,10 +24,17 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
   `SKILL.md` and every path shorter than it (or as long, sorting before it) are read, so it is not
   a copy of another one. Its id, name and main path don't change later. Its `also in` copies and the
   repository's warnings come at the end.
+- An organization shows **how far it has got** from the start. Before any repository is scanned,
+  GitHub lists them 100 at a time, and code search (with `GITHUB_TOKEN`) finds their `SKILL.md` files
+  100 at a time; on a large organization that takes a while. So, as soon as the owner is found, the
+  entry shows its name, `Listing its repositories… N repositories so far` and a bar that moves
+  without a total; then `N repositories listed. Searching them for SKILL.md files… F of T found`,
+  with a bar at `F` of `T`. Its totals come once the scan starts.
 - An organization's repositories are added the same way, each as soon as its first skill is read:
   kept in the organization's order whichever finishes first, its totals counting what is in so far, with
-  `scanned N of M` while it goes on. Its warnings come at the end. A repository that cannot be opened
-  is skipped with a warning; one that stops partway keeps its partial result and error.
+  `scanned N of M` and a bar at `N` of `M` while it goes on. Its warnings come at the end. A
+  repository that cannot be opened is skipped with a warning; one that stops partway keeps its
+  partial result and error.
 - **The page is all there while scans go on**: *Scan* takes more URLs (one being scanned already is
   not scanned twice), the filter works, cards open, *Back* returns, and *Remove* takes an entry out
   and stops its scan. A skill open in the address shows as soon as it is in. An entry is in the
@@ -78,7 +85,11 @@ object on each.
 - A repository: `{ type: "opened", source, ref, repository }` once its files are listed;
   `{ type: "skill", skill }` for each skill as soon as it is certain (as above, with `copies: []`),
   shortest path first; then `{ type: "done", scan }`, `scan` the answer without the header.
-- An organization: `{ type: "organization", source, owner, listed, scanning }` once its
+- An organization: `{ type: "listing", source, owner, repositories, search? }` while its
+  repositories are listed: once the owner is found (`repositories: 0`), after each page of
+  repositories (`repositories`: listed so far, forks and archived ones left out), then after each page
+  of code search (`search: { found, total }`: the `SKILL.md` files found so far, of the total GitHub
+  says it has); then `{ type: "organization", source, owner, listed, scanning }` once its
   repositories are listed (`scanning`: how many will be scanned); `{ type: "skill", index, source, ref, repository, skill }`
   for each skill of a repository as it is read, as for a repository; `{ type: "repository", index, repository }`
   for each repository as it is done, in the order they finish, `index` its place among the `scanning`
@@ -87,8 +98,9 @@ object on each.
 
 A failure that can be kept as a partial scan is returned in the usual result: its `error` is the
 first failure, and its skills are the ones read before it. A failure that stops the whole scan is
-the last line, `{ type: "error", error }`, with the CLI's message; before it, the status and body
-are as without the header.
+the last line, `{ type: "error", error }`, with the CLI's message; before the first line, the
+status and body are as without the header (an unknown owner is still a `422`). An organization's
+first line is out once its owner is found, so a failure listing its repositories is a line too.
 A page that goes away before its answer is done (*Remove* on an entry being scanned, a closed tab)
 stops the scan on the server too: nothing more is asked of GitHub for it, the requests under way are
 cancelled, and no repository of an organization still waiting its turn is opened.

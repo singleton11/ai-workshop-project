@@ -213,3 +213,22 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .prose th, .prose td { border: 1px solid var(--border); padding: 6px 10px; }
 .prose img { max-width: 100%; }
 .prose-empty { color: var(--muted); font-style: italic; }
+
+/* Progress: how far an organization's scan has got */
+.progress { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-5); }
+.progress-text { color: var(--muted); font-size: 13px; }
+.progress-bar {
+  appearance: none; -webkit-appearance: none;
+  width: 100%; max-width: 480px; height: 6px;
+  border: none; border-radius: 3px; background: var(--surface-2); color: var(--accent); overflow: hidden;
+}
+.progress-bar::-webkit-progress-bar { background: var(--surface-2); border-radius: 3px; }
+.progress-bar::-webkit-progress-value { background: var(--accent); border-radius: 3px; transition: width 0.2s ease; }
+.progress-bar::-moz-progress-bar { background: var(--accent); border-radius: 3px; }
+.progress-bar:indeterminate {
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--accent) 50%, var(--surface-2) 100%) 0 0 / 40% 100% no-repeat var(--surface-2);
+  animation: progress-slide 1.2s ease-in-out infinite;
+}
+.progress-bar:indeterminate::-webkit-progress-bar { background: transparent; }
+.progress-bar:indeterminate::-moz-progress-bar { background: transparent; }
+@keyframes progress-slide { from { background-position: -40% 0; } to { background-position: 140% 0; } }

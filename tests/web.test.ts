@@ -92,7 +92,7 @@ const RECORDING: Recording = {
 let base = '';
 const server = createWebServer({
   open: (url) => openGitHub(url, { fetch: replay(RECORDING) }),
-  openOwner: (url) => openGitHubOwner(url, { fetch: replay(RECORDING) }),
+  openOwner: (url, _signal, listing) => openGitHubOwner(url, { fetch: replay(RECORDING) }, listing),
   rules: DEFAULTS,
   note: () => {},
 });
@@ -202,9 +202,9 @@ test('GET /api/scan for an organization: its repositories with skills, each as f
 /**
  * A server whose GitHub holds these requests back until each is released, then answers it from the
  * recording, or with `answers`. A request is aborted, held back or not, as fetch's would be;
- * `fetched` is every one asked for.
+ * `fetched` is every one asked for. With `token`, through code search.
  */
-async function holding(held: string[], answers: Recording = {}) {
+async function holding(held: string[], answers: Recording = {}, { token }: { token?: string } = {}) {
   const releases = new Map<string, () => void>();
   const waits = new Map(held.map((url) => [url, new Promise<void>((resolve) => releases.set(url, resolve))]));
   const fetched: string[] = [];
@@ -219,8 +219,8 @@ async function holding(held: string[], answers: Recording = {}) {
     return replay({ ...RECORDING, ...answers })(url, init);
   };
   const server = createWebServer({
-    open: (url, signal) => openGitHub(url, { fetch: github, signal }),
-    openOwner: (url, signal) => openGitHubOwner(url, { fetch: github, signal }),
+    open: (url, signal) => openGitHub(url, { fetch: github, token, signal }),
+    openOwner: (url, signal, listing) => openGitHubOwner(url, { fetch: github, token, signal }, listing),
     rules: DEFAULTS,
     note: () => {},
   });
@@ -255,7 +255,7 @@ test('GET /api/scan for an organization, a line at a time: the owner, each repos
   const { status, type, text } = await answer;
   assert.equal(status, 200);
   assert.equal(type, 'application/x-ndjson; charset=utf-8');
-  const messages = text.trimEnd().split('\n').map((line) => JSON.parse(line));
+  const messages = text.trimEnd().split('\n').map((line) => JSON.parse(line)).slice(2);
   // The repositories to scan: the listed ones; the fork is not one of them.
   assert.deepEqual(messages[0], { type: 'organization', source: 'https://github.com/acme', owner: whole.owner, listed: 4, scanning: 4 });
   // empty, lost, other, tools: each is heard of once, with its answer only if it has skills.
@@ -278,6 +278,72 @@ test('GET /api/scan for an organization, a line at a time: the owner, each repos
       repository.skills.map((skill: { copies: string[] }) => ({ ...skill, copies: [] })).sort((a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : 1)),
     );
   }
+});
+
+/**
+ * big, an organization of 150 repositories and 3 forks, over two pages; code search, over two pages
+ * too, finds 150 SKILL.md files, all in a fork, which is not scanned. Both second pages are held back.
+ */
+const BIG_REPOSITORIES = 'https://api.github.com/orgs/big/repos?type=all&per_page=100&page=2';
+const BIG_SEARCH = 'https://api.github.com/search/code?q=filename:SKILL.md+org:big&per_page=100&page=2';
+const BIG: Recording = (() => {
+  const repository = (name: string, fork = false) => ({ full_name: `big/${name}`, default_branch: 'main', fork, archived: false });
+  const names = Array.from({ length: 150 }, (_, i) => `r${String(i).padStart(3, '0')}`);
+  const found = (from: number, to: number) =>
+    Array.from({ length: to - from }, (_, i) => ({ path: `skills/s${from + i}/SKILL.md`, repository: { full_name: 'big/fork-1' } }));
+  return {
+    'https://api.github.com/users/big': { status: 200, body: { login: 'big', type: 'Organization' } },
+    'https://api.github.com/orgs/big/repos?type=all&per_page=100&page=1': {
+      status: 200,
+      body: [...['fork-1', 'fork-2', 'fork-3'].map((name) => repository(name, true)), ...names.slice(0, 97).map((name) => repository(name))],
+    },
+    [BIG_REPOSITORIES]: { status: 200, body: names.slice(97).map((name) => repository(name)) },
+    'https://api.github.com/search/code?q=filename:SKILL.md+org:big&per_page=100&page=1': {
+      status: 200,
+      body: { total_count: 150, incomplete_results: false, items: found(0, 100) },
+    },
+    [BIG_SEARCH]: { status: 200, body: { total_count: 150, incomplete_results: false, items: found(100, 150) } },
+  };
+})();
+
+/** A line-at-a-time answer as it comes: reads lines until one matches, and returns every line read so far. */
+function reading(response: Response) {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  const messages: { type: string; [key: string]: unknown }[] = [];
+  let text = '';
+  return async (match: (message: { type: string; [key: string]: unknown }) => boolean) => {
+    while (!messages.some(match)) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error(`the answer ended without it: ${JSON.stringify(messages)}`);
+      text += decoder.decode(value, { stream: true });
+      const lines = text.split('\n');
+      text = lines.pop() ?? '';
+      messages.push(...lines.filter((line) => line.trim()).map((line) => JSON.parse(line)));
+    }
+    return [...messages];
+  };
+}
+
+test('an organization, a line at a time: first how far listing its repositories has got, each page of them, then each page of code search', async (t) => {
+  const server = await holding([BIG_REPOSITORIES, BIG_SEARCH], BIG, { token: 'test' });
+  t.after(server.close);
+  const response = await fetch(`${server.address}api/scan?url=github.com/big`, { headers: { Accept: 'application/x-ndjson' } });
+  assert.equal(response.status, 200);
+  const read = reading(response);
+  const owner = { id: 'big', url: 'https://github.com/big' };
+  const listing = (repositories: number, search?: { found: number; total: number }) =>
+    ({ type: 'listing', source: 'https://github.com/big', owner, repositories, ...(search ? { search } : {}) });
+  // As soon as the owner is found, and after the first page: the forks are not counted.
+  assert.deepEqual(await read((message) => message.repositories === 97), [listing(0), listing(97)]);
+  server.release(BIG_REPOSITORIES);
+  assert.deepEqual(await read((message) => message.search !== undefined), [listing(0), listing(97), listing(150), listing(150, { found: 100, total: 150 })]);
+  server.release(BIG_SEARCH);
+  assert.deepEqual((await read((message) => message.type === 'done')).slice(4), [
+    listing(150, { found: 150, total: 150 }),
+    { type: 'organization', source: 'https://github.com/big', owner, listed: 150, scanning: 0 },
+    { type: 'done', warnings: [] },
+  ]);
 });
 
 test('GET /api/scan for a repository, a line at a time: the repository, each skill as it is read, then the whole answer', async (t) => {
@@ -322,9 +388,19 @@ test('a line at a time: what fails before the first line is a 422 as at once; th
   const { status, text } = await lines(server.address, 'github.com/acme');
   assert.equal(status, 200);
   const messages = text.trimEnd().split('\n').map((line) => JSON.parse(line));
-  assert.equal(messages[0].type, 'organization');
+  assert.deepEqual(messages.slice(0, 3).map((message) => message.type), ['listing', 'listing', 'organization']);
   assert.deepEqual(messages.at(-1), { type: 'error', error: 'GitHub rate limit reached; set GITHUB_TOKEN' });
   assert.ok(!messages.some((message) => message.type === 'done'));
+
+  // Once the owner is found, the first line is out: a failure listing its repositories is a line too.
+  const listing = await holding([], { 'https://api.github.com/orgs/acme/repos?type=all&per_page=100&page=1': RATE_LIMITED });
+  t.after(listing.close);
+  const failed = await lines(listing.address, 'github.com/acme');
+  assert.equal(failed.status, 200);
+  assert.deepEqual(failed.text.trimEnd().split('\n').map((line) => JSON.parse(line)), [
+    { type: 'listing', source: 'https://github.com/acme', owner: { id: 'acme', url: 'https://github.com/acme' }, repositories: 0 },
+    { type: 'error', error: 'GitHub rate limit reached; set GITHUB_TOKEN' },
+  ]);
 });
 
 test('a repository, a line at a time: a file error keeps the other skills and is in the final result', async (t) => {
@@ -362,7 +438,8 @@ test('a page that goes away stops its scan: nothing more is fetched, and no queu
     signal: controller.signal,
   });
   const reader = response.body!.getReader();
-  assert.match(new TextDecoder().decode((await reader.read()).value), /"type":"organization"/);
+  // Its repositories are listed first; then they are scanned.
+  for (let text = ''; !/"type":"organization"/.test(text); ) text += new TextDecoder().decode((await reader.read()).value);
   await until(() => server.fetched.filter((url) => url.endsWith('/commits/main')).length === 8);
   controller.abort();
   await new Promise((resolve) => setTimeout(resolve, 100));
@@ -723,6 +800,10 @@ test('the page: an organization\'s repositories show up as each is scanned, in i
   assert.equal(p.$(organization)?.getAttribute('aria-busy'), 'true');
   assert.equal(p.text(`${organization} .organization-head .badge`), '3 skills in 1 of 4 repositories');
   assert.equal(p.text(`${organization} [data-progress]`), 'scanned 3 of 4');
+  // And a bar of it, which says so to a screen reader.
+  assert.equal(p.$(`${organization} progress`)?.getAttribute('aria-label'), 'Scanned 3 of 4 repositories');
+  assert.equal(p.$(`${organization} progress`)?.getAttribute('value'), '3');
+  assert.equal(p.$(`${organization} progress`)?.getAttribute('max'), '4');
   assert.deepEqual(p.texts(`${organization} .repository .repository-name`), ['acme/tools']);
   assert.equal(p.text('#count'), '3 skills');
   // Its warnings come once it is done.
@@ -733,7 +814,38 @@ test('the page: an organization\'s repositories show up as each is scanned, in i
   assert.deepEqual(p.texts(`${organization} .repository .repository-name`), ['acme/other', 'acme/tools']);
   assert.equal(p.text(`${organization} .organization-head .badge`), '4 skills in 2 of 4 repositories');
   assert.equal(p.$(`${organization} [data-progress]`), null);
+  assert.equal(p.$(`${organization} [data-progress-bar]`), null);
   assert.equal(p.text(`${organization} > .alert-warn li`), 'acme/lost: Not found in acme/lost: main; skipped');
+});
+
+test('the page: while an organization\'s repositories are listed, how far that has got, with a bar; then the scan', async (t) => {
+  const server = await holding([BIG_REPOSITORIES, BIG_SEARCH], BIG, { token: 'test' });
+  t.after(server.close);
+  const p = await page('', server.address);
+  (p.$('#scan-url') as HTMLInputElement).value = 'github.com/big';
+  (p.$('#scan-form') as HTMLFormElement).requestSubmit();
+  const organization = '[data-organization="big"]';
+  const step = `${organization} [data-progress-bar] .progress-text`;
+  // The repositories, 100 a page: how many so far, and a bar that cannot say how many are left.
+  await until(() => p.text(step) === 'Listing its repositories… 97 repositories so far');
+  assert.equal(p.$(organization)?.getAttribute('aria-busy'), 'true');
+  assert.equal(p.$(`${organization} progress`)?.hasAttribute('value'), false);
+  assert.equal(p.text('.organization-name'), 'big');
+  // No totals yet: nothing is scanned.
+  assert.equal(p.$(`${organization} .organization-head .badge`), null);
+  assert.equal(p.$(`${organization} .muted`), null);
+  assert.deepEqual(p.params(), ['https://github.com/big']);
+  // Then code search: how many SKILL.md files it found, of how many.
+  server.release(BIG_REPOSITORIES);
+  await until(() => p.text(step) === '150 repositories listed. Searching them for SKILL.md files… 100 of 150 found');
+  assert.equal(p.$(`${organization} progress`)?.getAttribute('value'), '100');
+  assert.equal(p.$(`${organization} progress`)?.getAttribute('max'), '150');
+  // Then the scan, here of no repository at all: the fork the files are in is left out.
+  server.release(BIG_SEARCH);
+  await until(() => !p.$('[aria-busy]'));
+  assert.equal(p.$(`${organization} [data-progress-bar]`), null);
+  assert.equal(p.text(`${organization} .organization-head .badge`), '0 skills in 0 of 150 repositories');
+  assert.equal(p.text(`${organization} .muted`), 'No skills in its repositories.');
 });
 
 test('the page: a card opened while its organization is still being scanned has an address that scans it again', async (t) => {
