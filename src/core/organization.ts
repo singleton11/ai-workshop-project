@@ -31,10 +31,17 @@ const AT_ONCE = 8;
 /**
  * Each repository, as `scan` does it. A repository that fails is a warning and the rest go on;
  * an empty one has nothing to say. Rate limit, a rejected token or no network stops everything.
+ * `scanned` hears of each repository as soon as it is done, in the order they finish: its place in
+ * `organization.repositories`, and its result, or undefined if it failed or is empty.
  */
-export async function scanOrganization(organization: Organization, rules: Rules): Promise<OrganizationResult> {
+export async function scanOrganization(
+  organization: Organization,
+  rules: Rules,
+  scanned?: (index: number, result: ScanResult | undefined) => void,
+): Promise<OrganizationResult> {
   const results: (ScanResult | string | undefined)[] = [];
   let next = 0;
+  let stopped = false;
   async function worker() {
     while (next < organization.repositories.length) {
       const index = next++;
@@ -44,10 +51,13 @@ export async function scanOrganization(organization: Organization, rules: Rules)
       } catch (error) {
         if (error instanceof GitHubUnavailable || !(error instanceof AtlasError)) {
           next = organization.repositories.length; // the other workers stop too
+          stopped = true; // and what they still finish is not heard of
           throw error;
         }
         results[index] = error instanceof EmptyRepository ? undefined : `${repository.id}: ${error.message}; skipped`;
       }
+      const result = results[index];
+      if (!stopped) scanned?.(index, typeof result === 'string' ? undefined : result);
     }
   }
   await Promise.all(Array.from({ length: Math.min(AT_ONCE, organization.repositories.length) }, worker));

@@ -7,8 +7,8 @@ import { createServer } from 'node:net';
 import { after, before, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { createBrowserBackend } from '../src/browser.ts';
-import { openGitHub, openGitHubOwner } from '../src/core/github.ts';
-import { replay, type Recording } from '../src/core/replay.ts';
+import { openGitHub, openGitHubOwner, type Fetch } from '../src/core/github.ts';
+import { replay, type Recorded, type Recording } from '../src/core/replay.ts';
 import { createWebServer, listen } from '../src/web/server.ts';
 import { atlas, CLI, DEFAULTS, FIXTURE } from './helpers.ts';
 
@@ -183,6 +183,86 @@ test('GET /api/scan for an organization: its repositories with skills, each as f
   assert.deepEqual(await api('github.com/nobody'), { status: 422, body: { error: 'Organization or user not found: https://github.com/nobody' } });
 });
 
+/**
+ * A server whose GitHub holds these requests back until each is released, then answers it from the
+ * recording, or with `answers`.
+ */
+async function holding(held: string[], answers: Recording = {}) {
+  const releases = new Map<string, () => void>();
+  const waits = new Map(held.map((url) => [url, new Promise<void>((resolve) => releases.set(url, resolve))]));
+  const github: Fetch = async (url, init) => {
+    await waits.get(url);
+    return replay({ ...RECORDING, ...answers })(url, init);
+  };
+  const server = createWebServer({
+    open: (url) => openGitHub(url, { fetch: github }),
+    openOwner: (url) => openGitHubOwner(url, { fetch: github }),
+    rules: DEFAULTS,
+    note: () => {},
+  });
+  const address = await listen(server, 0);
+  return {
+    address,
+    release: (url: string) => releases.get(url)?.(),
+    close: () => {
+      for (const release of releases.values()) release();
+      server.closeAllConnections();
+      server.close();
+    },
+  };
+}
+
+const RATE_LIMITED: Recorded = { status: 403, body: { message: 'API rate limit exceeded for 127.0.0.1.' } };
+
+/** `GET /api/scan`, a line at a time, as the page asks for an organization. */
+async function lines(address: string, url: string) {
+  const response = await fetch(`${address}api/scan?url=${encodeURIComponent(url)}`, { headers: { Accept: 'application/x-ndjson, application/json' } });
+  return { status: response.status, type: response.headers.get('content-type'), text: await response.text() };
+}
+
+test('GET /api/scan for an organization, a line at a time: the owner, each repository as it is done, then the warnings', async (t) => {
+  // acme/other is held back: acme/tools is done first, yet acme/other keeps its place in the list.
+  const server = await holding(['https://api.github.com/repos/acme/other/commits/trunk']);
+  t.after(server.close);
+  const answer = lines(server.address, 'https://github.com/acme/');
+  const { body: whole } = await api('https://github.com/acme');
+  setTimeout(() => server.release('https://api.github.com/repos/acme/other/commits/trunk'), 50);
+  const { status, type, text } = await answer;
+  assert.equal(status, 200);
+  assert.equal(type, 'application/x-ndjson; charset=utf-8');
+  const messages = text.trimEnd().split('\n').map((line) => JSON.parse(line));
+  // The repositories to scan: the listed ones; the fork is not one of them.
+  assert.deepEqual(messages[0], { type: 'organization', source: 'https://github.com/acme', owner: whole.owner, listed: 4, scanning: 4 });
+  // empty, lost, other, tools: each is heard of once, with its answer only if it has skills.
+  const repositories = messages.slice(1, -1);
+  assert.deepEqual(repositories.map((message) => message.type), ['repository', 'repository', 'repository', 'repository']);
+  assert.deepEqual(repositories.map((message) => message.index).sort(), [0, 1, 2, 3]);
+  assert.equal(repositories.at(-1).repository.source, 'https://github.com/acme/other');
+  const withSkills = repositories.filter((message) => message.repository).sort((a, b) => a.index - b.index);
+  // The same answers as the whole organization's at once.
+  assert.deepEqual(withSkills.map((message) => message.repository), whole.repositories);
+  assert.deepEqual(messages.at(-1), { type: 'done', warnings: whole.warnings });
+});
+
+test('a line at a time: what fails before the first line is a 422 as at once; the rate limit on the way, a line of its own', async (t) => {
+  const server = await holding([], { 'https://api.github.com/repos/acme/lost/commits/main': RATE_LIMITED });
+  t.after(server.close);
+  const unknown = await lines(server.address, 'github.com/nobody');
+  assert.equal(unknown.status, 422);
+  assert.deepEqual(JSON.parse(unknown.text), { error: 'Organization or user not found: https://github.com/nobody' });
+  // A repository is one answer, whatever the page asks for.
+  const repository = await lines(server.address, 'github.com/acme/other');
+  assert.equal(repository.type, 'application/json; charset=utf-8');
+  assert.deepEqual(JSON.parse(repository.text), (await api('github.com/acme/other')).body);
+
+  const { status, text } = await lines(server.address, 'github.com/acme');
+  assert.equal(status, 200);
+  const messages = text.trimEnd().split('\n').map((line) => JSON.parse(line));
+  assert.equal(messages[0].type, 'organization');
+  assert.deepEqual(messages.at(-1), { type: 'error', error: 'GitHub rate limit reached; set GITHUB_TOKEN' });
+  assert.ok(!messages.some((message) => message.type === 'done'));
+});
+
 test('a broken rules file → 422 and nothing is fetched', async (t) => {
   const fetched: string[] = [];
   const broken = createWebServer({
@@ -241,11 +321,11 @@ test('serve: prints its address and answers there', async () => {
 const APP = await readFile(new URL('../src/web/public/app.js', import.meta.url), 'utf8');
 
 /** The page at `?<search>#<hash>`, as served, with its fetch going to the test server. */
-async function page(address = '') {
-  const html = await (await fetch(base)).text();
-  const dom = new JSDOM(html, { url: `${base}${address}`, runScripts: 'outside-only', pretendToBeVisual: true });
+async function page(address = '', at = base) {
+  const html = await (await fetch(at)).text();
+  const dom = new JSDOM(html, { url: `${at}${address}`, runScripts: 'outside-only', pretendToBeVisual: true });
   const { window } = dom;
-  window.fetch = ((url: string) => fetch(new URL(url, base))) as typeof window.fetch;
+  window.fetch = ((url: string, init?: RequestInit) => fetch(new URL(url, at), init)) as typeof window.fetch;
   window.scrollTo = () => {};
   window.eval(APP);
   const document = window.document;
@@ -464,6 +544,70 @@ test('the page: the same skill in two entries, at two commits: each card opens i
   const reloaded = await page(`?repo=github.com/acme&repo=${encodeURIComponent('https://github.com/acme/tools/tree/v1')}${tagged.hash}`);
   await until(() => reloaded.text('#skill-view h1') === 'deploy');
   assert.equal(reloaded.text('#skill-view .lead'), 'The old deploy.');
+});
+
+test('the page: an organization\'s repositories show up as each is scanned, in its order, before the scan is done', async (t) => {
+  const held = 'https://api.github.com/repos/acme/other/commits/trunk';
+  const server = await holding([held]);
+  t.after(server.close);
+  const deploy = `#${new URLSearchParams({ in: 'https://github.com/acme', skill: 'acme/tools:skills/deploy/SKILL.md' })}`;
+  const p = await page(`?repo=github.com/acme${deploy}`, server.address);
+  // The open skill shows as soon as its repository is in, while acme/other is still being scanned.
+  await until(() => p.text('#skill-view h1') === 'deploy');
+  assert.equal(p.text('#skill-view .lead'), 'Ship to production. Carefully.');
+  assert.equal(p.text('#scan-button'), 'Scanning…');
+  (p.$('#skill-view .back') as HTMLButtonElement).click();
+  await until(() => p.$('#catalog-view')?.hidden === false);
+
+  const organization = '[data-organization="acme"]';
+  assert.equal(p.$(organization)?.getAttribute('aria-busy'), 'true');
+  assert.equal(p.text(`${organization} .organization-head .badge`), '3 skills in 1 of 4 repositories');
+  assert.equal(p.text(`${organization} [data-progress]`), 'scanned 3 of 4');
+  assert.deepEqual(p.texts(`${organization} .repository .repository-name`), ['acme/tools']);
+  assert.equal(p.text('#count'), '3 skills');
+  // Its warnings come once it is done.
+  assert.equal(p.$(`${organization} > .alert-warn`), null);
+
+  server.release(held);
+  await until(() => !p.$('[aria-busy]'));
+  assert.deepEqual(p.texts(`${organization} .repository .repository-name`), ['acme/other', 'acme/tools']);
+  assert.equal(p.text(`${organization} .organization-head .badge`), '4 skills in 2 of 4 repositories');
+  assert.equal(p.$(`${organization} [data-progress]`), null);
+  assert.equal(p.text(`${organization} > .alert-warn li`), 'acme/lost: Not found in acme/lost: main; skipped');
+  assert.equal(p.text('#scan-button'), 'Scan');
+});
+
+test('the page: an organization that fails on the way is an error under the input, and the catalog as it was', async (t) => {
+  // acme/lost answers with the rate limit, once acme/tools is on the page.
+  const held = 'https://api.github.com/repos/acme/lost/commits/main';
+  const server = await holding([held], { [held]: RATE_LIMITED });
+  t.after(server.close);
+  const p = await page('', server.address);
+  await p.scan('github.com/acme/other');
+  (p.$('#scan-url') as HTMLInputElement).value = 'github.com/acme';
+  (p.$('#scan-form') as HTMLFormElement).requestSubmit();
+  await until(() => p.texts('[data-organization="acme"] .repository .repository-name').includes('acme/tools'));
+  server.release(held);
+  await until(() => !p.$('[aria-busy]') && p.text('#scan-error') !== '');
+  assert.equal(p.text('#scan-error'), 'GitHub rate limit reached; set GITHUB_TOKEN');
+  assert.deepEqual(p.texts('.organization-name'), []);
+  assert.deepEqual(p.texts('.repository-name'), ['acme/other']);
+  assert.deepEqual(p.params(), ['https://github.com/acme/other']);
+  assert.equal(p.text('#count'), '1 skill');
+});
+
+test('the page: an organization scanned again that fails on the way is left as it was', async (t) => {
+  const p = await page();
+  await p.scan('github.com/acme');
+  const before = p.$('#repositories')?.innerHTML;
+  // The same page, now against a GitHub out of requests for acme/lost.
+  const server = await holding([], { 'https://api.github.com/repos/acme/lost/commits/main': RATE_LIMITED });
+  t.after(server.close);
+  p.window.fetch = ((url: string, init?: RequestInit) => fetch(new URL(url, server.address), init)) as typeof p.window.fetch;
+  await p.scan('https://github.com/acme');
+  assert.equal(p.text('#scan-error'), 'GitHub rate limit reached; set GITHUB_TOKEN');
+  assert.equal(p.$('#repositories')?.innerHTML, before);
+  assert.deepEqual(p.params(), ['https://github.com/acme']);
 });
 
 test('the page: an unknown organization is an error under the input, and the catalog as it was', async () => {

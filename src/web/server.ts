@@ -8,7 +8,7 @@ import { AtlasError } from '../core/errors.ts';
 import { parseGitHubOwnerUrl, parseGitHubUrl } from '../core/github.ts';
 import { skillLink } from '../core/model.ts';
 import { scanOrganization, type Organization } from '../core/organization.ts';
-import { parseRules } from '../core/rules.ts';
+import { parseRules, type Rules } from '../core/rules.ts';
 import { scan, type ScanResult, type Source } from '../core/scan.ts';
 import { renderBody } from './render.ts';
 
@@ -62,14 +62,17 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
   if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(request.headers.host ?? '')) return send(response, 403, { error: 'Forbidden' });
   const url = new URL(request.url ?? '/', 'http://localhost');
   if (request.method !== 'GET' && request.method !== 'HEAD') return send(response, 405, { error: 'Method not allowed' });
-  if (url.pathname === '/api/scan') return scanRequest(url.searchParams.get('url') ?? '', response, options);
+  if (url.pathname === '/api/scan') {
+    const stream = /\bapplication\/x-ndjson\b/.test(request.headers.accept ?? '');
+    return scanRequest(url.searchParams.get('url') ?? '', stream, response, options);
+  }
   const asset = ASSETS[url.pathname];
   if (!asset) return send(response, 404, { error: `Not found: ${url.pathname}` });
   response.writeHead(200, { ...HEADERS, 'Content-Type': asset.type, 'Cache-Control': 'no-cache' });
   response.end(await readFile(new URL(asset.file, PUBLIC)));
 }
 
-async function scanRequest(input: string, response: ServerResponse, { open, openOwner, rules, note }: WebOptions) {
+async function scanRequest(input: string, stream: boolean, response: ServerResponse, { open, openOwner, rules, note }: WebOptions) {
   const name = parseGitHubUrl(input);
   const owner = name ? undefined : parseGitHubOwnerUrl(input);
   if (!input.trim()) return send(response, 400, { error: 'Paste a GitHub repository or organization URL' });
@@ -79,7 +82,9 @@ async function scanRequest(input: string, response: ServerResponse, { open, open
     const file = await rules.load(undefined, note);
     const parsed = parseRules(file.text, file.path);
     if (name) return send(response, 200, repositoryAnswer(await scan(await open(input), parsed), name.ref ?? ''));
-    const result = await scanOrganization(await openOwner(input), parsed);
+    const organization = await openOwner(input);
+    if (stream) return await streamOrganization(organization, parsed, response);
+    const result = await scanOrganization(organization, parsed);
     send(response, 200, {
       // An organization is one entry in the catalog, like a repository: the same source replaces it.
       source: result.owner.url,
@@ -92,6 +97,28 @@ async function scanRequest(input: string, response: ServerResponse, { open, open
     if (!(error instanceof AtlasError)) throw error;
     send(response, 422, { error: error.message });
   }
+}
+
+/**
+ * An organization, a line at a time, so the page adds each repository as soon as it is scanned:
+ * the owner first, then each repository as it is done, then the warnings. Once the first line is
+ * out, a failure can only be a line of its own.
+ */
+async function streamOrganization(organization: Organization, rules: Rules, response: ServerResponse) {
+  response.writeHead(200, { ...HEADERS, 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' });
+  const line = (body: unknown) => response.write(`${JSON.stringify(body)}\n`);
+  const { owner, listed, repositories } = organization;
+  line({ type: 'organization', source: owner.url, owner, listed, scanning: repositories.length });
+  try {
+    const result = await scanOrganization(organization, rules, (index, scanned) =>
+      line({ type: 'repository', index, repository: scanned && scanned.skills.length > 0 ? repositoryAnswer(scanned, '') : undefined }),
+    );
+    line({ type: 'done', warnings: result.warnings });
+  } catch (error) {
+    if (!(error instanceof AtlasError)) throw error;
+    line({ type: 'error', error: error.message });
+  }
+  response.end();
 }
 
 /** One repository's scan, as the page shows it: each skill with its link, its summary and its body made safe. */

@@ -1,5 +1,6 @@
 // The catalog page: paste a GitHub URL, of a repository or of an organization, the skills fill the
 // catalog; a card opens its skill.
+// An organization's repositories arrive one by one, as the server scans them.
 // Nothing is stored: the scanned URLs live in the address, `?repo=<url>`, the open skill in
 // `#in=<entry's source>&skill=<id>`: the same skill can be in two entries, at two commits.
 // spec/web.md.
@@ -9,7 +10,7 @@
 /** @typedef {{ source: string, ref: string, repository: { id: string, url: string, commit: string },
  *   skills: Skill[], warnings: string[] }} Scan */
 /** @typedef {{ source: string, owner: { id: string, url: string }, listed: number, repositories: Scan[],
- *   warnings: string[] }} OrganizationScan */
+ *   warnings: string[], scanning?: number, scanned?: number }} OrganizationScan */
 /** @typedef {{ key: string, scan?: Scan | OrganizationScan, loading: boolean }} Entry */
 
 const $ = (id) => document.getElementById(id);
@@ -20,6 +21,8 @@ let filter = '';
 let catalogScroll = 0;
 /** True when the open skill was reached from the catalog, so Back can be the browser's. */
 let openedFromCatalog = false;
+/** The skill the skill view shows, if it found it. */
+let shownSkill;
 
 /** An element, its attributes and children; text is always text. */
 function h(tag, attributes = {}, ...children) {
@@ -45,27 +48,94 @@ async function scan(input) {
   if (!existing) entries.push(entry);
   render();
   setBusy(true);
-  try {
-    const response = await fetch(`/api/scan?url=${encodeURIComponent(input)}`);
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error ?? `The server answered ${response.status}`);
-    /** @type {Scan} */
-    const result = body;
-    // Another URL for a repository already here: the new scan replaces it, where it was.
+  // Where the scan goes, and what was there before it, to put back if it fails.
+  let target = entry;
+  let previous = entry.scan;
+  /** The scan's result so far: another URL for an entry already here replaces that one, where it was. */
+  const show = (result) => {
     const same = entries.find((other) => other !== entry && other.scan?.source === result.source);
-    if (same) entries = entries.filter((other) => other !== entry);
-    Object.assign(same ?? entry, { key: result.source, scan: result, loading: false });
+    if (same && same !== target) {
+      entries = entries.filter((other) => other !== entry);
+      target = same;
+      previous = same.scan;
+      same.loading = true;
+    }
+    Object.assign(target, { key: result.source, scan: result });
+  };
+  try {
+    const response = await fetch(`/api/scan?url=${encodeURIComponent(input)}`, { headers: { Accept: 'application/x-ndjson, application/json' } });
+    if ((response.headers.get('Content-Type') ?? '').startsWith('application/x-ndjson')) {
+      await readOrganization(response, show);
+    } else {
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? `The server answered ${response.status}`);
+      show(body);
+    }
+    target.loading = false;
     if (!existing) $('scan-url').value = '';
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
     // The catalog is left as it was.
-    if (existing?.scan) existing.loading = false;
-    else entries = entries.filter((other) => other !== entry);
+    if (previous) Object.assign(target, { key: previous.source, scan: previous, loading: false });
+    else entries = entries.filter((other) => other !== target);
   } finally {
     setBusy(entries.some((other) => other.loading));
     saveAddress();
     render();
   }
+}
+
+/**
+ * An organization, a line at a time: each repository is shown as soon as the server has scanned it,
+ * in the order the organization lists them. A failure on the way fails the whole scan.
+ * @param {Response} response @param {(scan: OrganizationScan) => void} show
+ */
+async function readOrganization(response, show) {
+  /** @type {OrganizationScan | undefined} */
+  let scan;
+  const scanned = []; // by the repository's place in the list; holes for those without skills
+  let done = false;
+  const take = (line) => {
+    const message = JSON.parse(line);
+    if (message.type === 'error') throw new Error(message.error);
+    if (message.type === 'organization') {
+      const { source, owner, listed, scanning } = message;
+      scan = { source, owner, listed, repositories: [], warnings: [], scanning, scanned: 0 };
+    } else if (scan && message.type === 'repository') {
+      scan.scanned++;
+      if (message.repository) scanned[message.index] = message.repository;
+      scan.repositories = scanned.filter(Boolean);
+    } else if (scan && message.type === 'done') {
+      scan.warnings = message.warnings;
+      done = true;
+    } else return;
+    show(scan);
+    progress();
+  };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  try {
+    for (;;) {
+      const { value, done: ended } = await reader.read();
+      text += decoder.decode(value, { stream: !ended });
+      const lines = text.split('\n');
+      text = lines.pop() ?? '';
+      for (const line of lines) if (line.trim()) take(line);
+      if (ended) break;
+    }
+    if (text.trim()) take(text);
+  } catch (error) {
+    reader.cancel().catch(() => {});
+    throw error;
+  }
+  if (!done) throw new Error('The scan stopped before it was done; try again');
+}
+
+/** A scan got further: the catalog shows it, but a skill already open is left alone, where it was scrolled to. */
+function progress() {
+  if (openSkill() && shownSkill) return;
+  render();
 }
 
 function remove(entry) {
@@ -132,7 +202,10 @@ function render() {
   $('catalog-view').hidden = Boolean(open);
   $('skill-view').hidden = !open;
   if (open) renderSkill(open);
-  else renderCatalog();
+  else {
+    shownSkill = undefined;
+    renderCatalog();
+  }
 }
 
 function matches(skill) {
@@ -170,12 +243,14 @@ function renderOrganization(entry, scan) {
       h('h2', { class: 'repository-name organization-name' },
         h('a', { href: scan.source, target: '_blank', rel: 'noopener noreferrer' }, scan.owner.id)),
       h('span', { class: 'badge' }, organizationSummary(skills, scan.repositories.length, scan.listed)),
+      entry.loading && scan.scanning !== undefined && h('span', { class: 'badge badge-muted', 'data-progress': '' },
+        `scanned ${scan.scanned} of ${scan.scanning}`),
       entry.loading && h('span', { class: 'spinner', 'aria-label': 'Scanning' }),
       removeButton(entry, scan.owner.id)),
     renderWarnings(scan.warnings),
     scan.repositories.length > 0
       ? scan.repositories.map((repository) => renderRepository(repository, scan.source))
-      : h('p', { class: 'muted' }, 'No skills in its repositories.'));
+      : h('p', { class: 'muted' }, entry.loading ? 'Scanning its repositories…' : 'No skills in its repositories.'));
 }
 
 /** `N skills in M of K repositories`, as the CLI says it. */
@@ -229,6 +304,7 @@ function renderCard(skill, origin) {
 
 function renderSkill(open) {
   const found = findSkill(open);
+  shownSkill = found?.skill;
   const back = h('button', { class: 'button back', type: 'button', onclick: closeSkill }, '← Back to the catalog');
   if (!found) {
     const loading = entries.some((entry) => entry.loading);

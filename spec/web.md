@@ -19,6 +19,13 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
 - An organization is **one entry**: its name, `N skills in M of K repositories`, its warnings, then
   each repository with skills, as above, inside it. It is removed as a whole, and scanning it again
   replaces it. A repository of it scanned on its own as well is another entry.
+- An organization's repositories are added **as each one is scanned**, not once all of them are:
+  kept in the organization's order whichever finishes first, its totals counting what is in so far, with
+  `scanned N of M` while it goes on. Its warnings come at the end. A skill open in the address shows
+  as soon as its repository is in. A repository on its own comes at once: which copy of a skill is
+  its main path, and its id, are known only when all its `SKILL.md` files are read.
+- If an organization's scan stops on the way (rate limit, a rejected token, no network: it stops the
+  CLI's too), what it added is taken out again: the error is shown under the input, the catalog as it was.
 - Warnings are shown with their repository, or their organization; an error (not found, rate limit,
   not a URL) is shown under the input, and the catalog is left as it was.
 
@@ -51,5 +58,12 @@ same `source` is the same repository in the catalog. `summary` is the descriptio
 An organization's URL → `200 { source, owner: { id, url }, listed, repositories: [<as above, each>], warnings }`,
 `source` being `https://github.com/<owner>`; `repositories`, those with skills; `warnings`, those
 of the organization and its other repositories, `<owner>/<repo>: <warning>`.
+With `Accept: application/x-ndjson` (the page asks so), an organization is answered a line at a
+time, a JSON object on each: `{ type: "organization", source, owner, listed, scanning }` once its
+repositories are listed (`scanning`: how many will be scanned); `{ type: "repository", index, repository }`
+for each as it is done, in the order they finish, `index` its place among the `scanning` ones and
+`repository` its answer as above, left out if it has no skills; then `{ type: "done", warnings }`.
+A failure after the first line is the last line, `{ type: "error", error }`, with the CLI's message;
+before it, the status and body are as without the header. A repository is one answer either way.
 A bad or missing URL, or a local path → `400 { error }`; any other failure the CLI explains
 (not found, rate limit, broken rules file) → `422 { error }`, with the CLI's message.
