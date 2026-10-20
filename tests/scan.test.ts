@@ -92,3 +92,30 @@ test('rate limit → a message that asks for GITHUB_TOKEN', async () => {
     message: 'GitHub rate limit reached; set GITHUB_TOKEN',
   });
 });
+
+test('…/tree/<ref> scans that commit, through the tree even with a token', async () => {
+  const commit = '1111111111111111111111111111111111111111';
+  const pinned = replay({
+    'https://api.github.com/repos/JetBrains/example': { status: 200, body: { full_name: 'JetBrains/example', default_branch: 'main' } },
+    [`https://api.github.com/repos/JetBrains/example/commits/${commit}`]: { status: 200, body: { sha: commit } },
+    [`https://api.github.com/repos/JetBrains/example/git/trees/${commit}?recursive=1`]: {
+      status: 200,
+      body: { truncated: false, tree: [{ path: '.claude/skills/old/SKILL.md', mode: '100644', type: 'blob', sha: 'a' }] },
+    },
+    [`https://raw.githubusercontent.com/JetBrains/example/${commit}/.claude/skills/old/SKILL.md`]: {
+      status: 200,
+      body: '---\nname: old\ndescription: A skill at an older commit.\n---\n',
+    },
+  });
+  const source = await openGitHub(`https://github.com/JetBrains/example/tree/${commit}/`, { fetch: pinned, token: 'test' });
+  assert.equal(source.repository.commit, commit);
+  assert.deepEqual(source.paths, ['.claude/skills/old/SKILL.md']);
+
+  const missing = replay({
+    'https://api.github.com/repos/JetBrains/example': { status: 200, body: { full_name: 'JetBrains/example', default_branch: 'main' } },
+    'https://api.github.com/repos/JetBrains/example/commits/no-such-branch': { status: 404, body: { message: 'No commit found' } },
+  });
+  await assert.rejects(openGitHub('github.com/JetBrains/example/tree/no-such-branch', { fetch: missing }), {
+    message: 'Not found in JetBrains/example: no-such-branch',
+  });
+});

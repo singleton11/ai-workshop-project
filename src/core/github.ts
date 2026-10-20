@@ -14,13 +14,18 @@ export type GitHubOptions = {
 const API = 'https://api.github.com';
 const RAW = 'https://raw.githubusercontent.com';
 
-/** `https://github.com/owner/repo`, with or without the scheme, a trailing slash or `.git`. */
-export function parseGitHubUrl(input: string): { owner: string; repo: string } | undefined {
-  const match = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i.exec(input.trim());
-  return match ? { owner: match[1], repo: match[2] } : undefined;
+/**
+ * `https://github.com/owner/repo`, with or without the scheme, a trailing slash or `.git`;
+ * `…/tree/<ref>` pins a commit, a branch or a tag instead of the default branch.
+ */
+export function parseGitHubUrl(input: string): { owner: string; repo: string; ref?: string } | undefined {
+  const match = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/tree\/([^?#]+?))?\/?$/i.exec(
+    input.trim(),
+  );
+  return match ? { owner: match[1], repo: match[2], ref: match[3] } : undefined;
 }
 
-/** Resolves the default branch to a commit and lists the files that may be skills. */
+/** Resolves the ref, by default the default branch, to a commit and lists the files that may be skills. */
 export async function openGitHub(input: string, options: GitHubOptions): Promise<Source> {
   const name = parseGitHubUrl(input);
   if (!name) throw new AtlasError(`Not a GitHub repository URL: ${input}`);
@@ -30,9 +35,14 @@ export async function openGitHub(input: string, options: GitHubOptions): Promise
     `Repository not found: https://github.com/${name.owner}/${name.repo}`,
   );
   const id = info.full_name;
-  const { sha } = await github.json<{ sha: string }>(`${API}/repos/${id}/commits/${encodePath(info.default_branch)}`);
+  const ref = name.ref ?? info.default_branch;
+  const { sha } = await github.json<{ sha: string }>(
+    `${API}/repos/${id}/commits/${encodePath(ref)}`,
+    `Not found in ${id}: ${ref}`,
+  );
   const warnings: string[] = [];
-  const paths = options.token ? await searchPaths(github, id) : await treePaths(github, id, sha, warnings);
+  // Code search sees only the default branch, so a pinned ref is always listed through its tree.
+  const paths = options.token && !name.ref ? await searchPaths(github, id) : await treePaths(github, id, sha, warnings, !name.ref);
   const [organization, repo] = id.split('/');
   return {
     repository: { id, organization, name: repo, url: `https://github.com/${id}`, commit: sha },
@@ -59,10 +69,12 @@ async function searchPaths(github: Client, id: string): Promise<string[]> {
 type Tree = { truncated: boolean; tree: { path: string; mode: string; type: string; sha: string }[] };
 
 /** The whole tree at once, or only the skill roots when it is too large for one answer. */
-async function treePaths(github: Client, id: string, sha: string, warnings: string[]): Promise<string[]> {
+async function treePaths(github: Client, id: string, sha: string, warnings: string[], searchable: boolean): Promise<string[]> {
   const tree = await github.json<Tree>(`${API}/repos/${id}/git/trees/${sha}?recursive=1`);
   if (!tree.truncated) return files(tree);
-  warnings.push(`the tree is too large to list at once; looked only in ${SKILL_ROOTS.join(', ')} (GITHUB_TOKEN searches everywhere)`);
+  // Code search sees only the default branch: for a pinned ref, GITHUB_TOKEN does not help.
+  const hint = searchable ? ' (GITHUB_TOKEN searches everywhere)' : '';
+  warnings.push(`the tree is too large to list at once; looked only in ${SKILL_ROOTS.join(', ')}${hint}`);
   const paths: string[] = [];
   for (const root of SKILL_ROOTS) {
     const rootSha = await directory(github, id, sha, root);
