@@ -1,0 +1,124 @@
+$ npm test (on air/organization-listing-progress-issue-8)
+✔ code search fails on page 2: the skills from page 1, then "scan incomplete", exit code 1; no links looked for (36.103564ms)
+✔ a SKILL.md that cannot be read: left out, not "not found"; the others are listed; --filter too (11.2313ms)
+✔ a symbolic link that cannot be read: left out, without a warning; the first error in path order (4.091499ms)
+✔ a tree too large, and a skill folder that fails: the other folders are listed (7.268225ms)
+✔ the tree itself fails: 0 skills, then the error; before the commit is known, the error alone (5.106696ms)
+✔ the connection drops while a SKILL.md downloads: the skills read before it, then "scan incomplete" (58.779709ms)
+✔ the connection drops while a code search page downloads: the pages before it are kept (9.909225ms)
+✔ https://github.com/<owner> is an organization; …/<owner>/<repo> is still a repository (2.218989ms)
+✔ an organization, without a token: each repository through its tree, the ones with skills printed, sorted by name (57.258989ms)
+✔ an organization filter applies to its repository skills without filtering warnings (4.971193ms)
+✔ an organization, with a token: one code search, and only the repositories it finds a SKILL.md in are opened (5.472526ms)
+✔ a code search that cannot list everything → a warning, and every repository through its tree (4.284005ms)
+✔ a user: their repositories, every page of them, and `user:` in the code search (16.591443ms)
+✔ no repository with skills: the totals only (1.921561ms)
+✔ an unknown owner → a clear message, exit code 1 (1.932042ms)
+✔ the rate limit stops the whole scan: a clear message, exit code 1, nothing printed (4.12078ms)
+✔ at most 8 repositories at the same time (34.012198ms)
+✔ an empty repository on its own → a clear message, exit code 1 (1.012127ms)
+✔ the browser terminal scans an organization too (3.72351ms)
+✔ help says an organization can be scanned (0.169894ms)
+✔ the first scan writes the default rules and says so; later scans keep the file as it is (59.111198ms)
+✔ where the rules are: $SKILL_ATLAS_RULES, else $XDG_CONFIG_HOME, else ~/.config; %APPDATA% on Windows (6.664198ms)
+✔ two first scans at the same moment: one file, written once, never overwritten (4.896271ms)
+✔ rules that cannot be written: a warning, and the scan uses the defaults (14.766255ms)
+✔ --rules: this file for this run; a missing one is an error, and is not created (1.619943ms)
+✔ the user’s own patterns: a product folder becomes a skill, the fixture stops being test data (19.294675ms)
+✔ a key left out keeps its default; [] means none (10.399858ms)
+✔ each kind of warning can be turned off (16.965073ms)
+✔ a broken rules file: <path>:<line>: the problem, exit code 1, nothing scanned (23.62334ms)
+✔ rules shows the file, or the defaults it will have; --defaults the current defaults (3.215456ms)
+✔ help and an unknown command write nothing (0.701709ms)
+✔ in the browser: the built-in defaults, which cannot be changed there (0.524654ms)
+✔ malformed front matter → the directory name, no description and a warning (3.663077ms)
+✔ front matter that refers to itself → malformed, so a JSON answer cannot fail on it (3.498353ms)
+✔ scan prints the repository, then each skill with its first sentence and pinned link (0.194365ms)
+✔ ./fixture: every skill, sorted by name, linked to its file, with a warning for the malformed one (0.338759ms)
+✔ the CLI prints the result at once and stores nothing but the rules file (246.605043ms)
+✔ unreachable repository → a clear message, exit code 1 (12.077042ms)
+✔ rate limit → a message that asks for GITHUB_TOKEN (0.701539ms)
+✔ …/tree/<ref> scans that commit, through the tree even with a token (1.775347ms)
+✔ --filter keeps the skills whose name, description or path contains the text, in any letter case (15.077083ms)
+✔ --filter: no match is not an error; an empty text keeps every skill; given twice → usage (7.403858ms)
+✔ a skill: the root SKILL.md, and any SKILL.md, in any letter case, under a skills folder at any depth (55.041659ms)
+✔ a root SKILL.md without a name in its front matter is named after the repository (5.403494ms)
+✔ not a skill, and test data: not listed, each with a warning that names why (11.332433ms)
+✔ scanning skill-atlas itself finds 0 skills, and warns about the fixture as test data (6.618157ms)
+✔ identical copies, CRLF and a BOM aside, are one skill: linked at the shortest path, the rest "also in" (7.774477ms)
+✔ identical copies of the same length: the main path is the one that sorts first (7.695415ms)
+✔ a copy in test data is not a copy: it is skipped, with its warning (8.557909ms)
+✔ identical copies without a name are named after the main path’s folder (5.972249ms)
+✔ malformed front matter in identical copies: one warning, for the main path (7.955113ms)
+✔ the same name, different content: each listed, one warning that counts groups, not files (7.671594ms)
+✔ a symbolic link to a skills folder: its skills are copies, never listed twice; the shortest path wins, a link too (5.425765ms)
+✔ a link the rules accept to a target they do not: listed at the link, no warning for the target (6.002211ms)
+✔ a link outside the repository, at nothing, or in a loop: a warning, skipped (22.764198ms)
+✔ GitHub: SKILL.md and skill.md in one folder, and a symbolic link, follow the same rules (41.401245ms)
+✔ the page and its files, with a policy that allows no inline script (32.936869ms)
+✔ only for the page itself: another host name is refused (3.953786ms)
+✔ GET /api/scan: the skills, sorted, each with its link, summary, copies, properties and body (36.525565ms)
+✔ the body is made safe: raw HTML is text, unsafe links are dropped, relative and root-relative ones go to GitHub (7.831289ms)
+✔ …/tree/<ref>: that ref, and a source of its own (4.859089ms)
+✔ a missing or bad URL, or a local directory → 400; what the CLI explains → 422, with its message (10.507741ms)
+✔ a scan that stopped partway → 200, the skills read before it, and the error (6.811972ms)
+✔ GET /api/scan for an organization: its repositories with skills, each as for one, and the other warnings (9.949355ms)
+✔ GET /api/scan for an organization, a line at a time: the owner, each repository's skills as they are read and the repository as it is done, then the warnings (58.760568ms)
+✔ an organization, a line at a time: first how far listing its repositories has got, each page of them, then each page of code search (7.404268ms)
+✔ GET /api/scan for a repository, a line at a time: the repository, each skill as it is read, then the whole answer (59.991862ms)
+✔ a line at a time: what fails before the first line is a 422 as at once; the rate limit on the way, a line of its own (10.601943ms)
+✔ a repository, a line at a time: a file error keeps the other skills and is in the final result (5.282772ms)
+✔ a page that goes away stops its scan: nothing more is fetched, and no queued repository is opened (205.001953ms)
+✔ a broken rules file → 422 and nothing is fetched (4.023617ms)
+✔ serve: in the help; a port in use → a clear message, exit code 1; not in the browser (160.992838ms)
+✔ serve: prints its address and answers there (158.725417ms)
+✔ the page: an empty catalog first (111.318942ms)
+✔ the page: a pasted URL fills the catalog with a card per skill, sorted, and goes into the address (49.351448ms)
+✔ the page: warnings with their repository (35.780786ms)
+✔ the page: more repositories, grouped; the same one again replaces it; each can be removed (98.994203ms)
+✔ the page: the filter narrows by name, description or path, in any letter case (42.894335ms)
+✔ the page: an error under the input, and the catalog as it was (65.764625ms)
+✔ the page: a scan that stopped partway adds the skills read before it, with the error (26.394365ms)
+✔ the page: a repository already in the catalog keeps its skills when a new scan of it stops partway (44.9641ms)
+✔ the page: a card opens its skill, with everything the SKILL.md says; Back returns to the catalog (52.534042ms)
+✔ the page: nothing is stored; a reload of the address scans again and opens the skill (50.801616ms)
+✔ the page: an organization is one entry, its repositories with skills inside it (46.488871ms)
+✔ the page: the organization again replaces it; one of its repositories is an entry of its own; it is removed as a whole (87.618909ms)
+✔ the page: a skill of an organization opens, and a reload of its address scans the organization again (23.888867ms)
+✔ the page: the same skill in two entries, at two commits: each card opens its own, and so does a reload (113.48289ms)
+✔ the page: an organization's repositories show up as each is scanned, in its order, before the scan is done (41.709664ms)
+✔ the page: while an organization's repositories are listed, how far that has got, with a bar; then the scan (48.68197ms)
+✔ the page: a card opened while its organization is still being scanned has an address that scans it again (80.139569ms)
+✔ the page: an organization that fails on the way is an error under the input, and the catalog as it was (56.325083ms)
+✔ the page: an organization scanned again that fails on the way is left as it was (41.363664ms)
+✔ the page: an unknown organization is an error under the input, and the catalog as it was (33.027121ms)
+✔ the page: a repository's skills show up as each is read; the page is all there while it goes on (136.668429ms)
+✔ the page: an organization's repository keeps its readable skills when one file fails (39.645648ms)
+✔ the page: an entry removed while it is being scanned is gone, its scan with it (244.191409ms)
+✔ the page: open warnings stay open, and a focused card keeps the focus, as a scan draws the catalog again (75.071235ms)
+ℹ tests 97
+ℹ suites 0
+ℹ pass 97
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3698.21615
+
+$ node time.mts JetBrains   # openGitHubOwner on live GitHub, GITHUB_TOKEN set: each listing callback, with its time
+0.3s {"r":0}
+1.9s {"r":65}
+3.9s {"r":128}
+5.9s {"r":196}
+8.0s {"r":253}
+10.0s {"r":315}
+11.8s {"r":369}
+13.8s {"r":442}
+15.3s {"r":508}
+16.6s {"r":549}
+17.5s {"r":549,"s":{"found":100,"total":423}}
+18.2s {"r":549,"s":{"found":200,"total":423}}
+19.0s {"r":549,"s":{"found":300,"total":423}}
+19.6s {"r":549,"s":{"found":400,"total":423}}
+20.2s {"r":549,"s":{"found":431,"total":431}}
+listed 549 to scan 31 [] 20.2s
