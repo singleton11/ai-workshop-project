@@ -20,6 +20,9 @@ export function drop(file, n) {
 
 /** `skill-atlas serve` with flaky.mjs, from `cwd`; `env` is added to this process's (DROP_FILE, LATENCY_MS, REPLAY…). */
 export async function startServer({ cwd = REPO, port = Number(process.env.PORT ?? 4188), env = {} } = {}) {
+  const url = `http://localhost:${port}/`;
+  // Something else answering there would be taken for this server.
+  if (await fetch(url).then(() => true, () => false)) throw new Error(`Port ${port} is in use; set PORT`);
   const server = spawn(process.execPath, ['--import', `${DIR}/flaky.mjs`, 'src/cli.ts', 'serve', '--port', String(port)], {
     cwd,
     env: { ...process.env, ...env },
@@ -30,8 +33,8 @@ export async function startServer({ cwd = REPO, port = Number(process.env.PORT ?
   for (const event of ['uncaughtException', 'unhandledRejection']) {
     process.on(event, (error) => (console.error(error), stop(), process.exit(1)));
   }
-  const url = `http://localhost:${port}/`;
   for (let attempt = 0; ; attempt++) {
+    if (server.exitCode !== null || server.signalCode !== null) throw new Error(`skill-atlas serve exited (${server.exitCode ?? server.signalCode})`);
     try {
       await fetch(url);
       return { url, stop };
