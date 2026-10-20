@@ -1,0 +1,3 @@
+#!/bin/sh
+# ./skill-atlas scan <GitHub URL | directory>: the CLI, from wherever this checkout is.
+exec node "$(dirname "$0")/src/cli.ts" "$@"

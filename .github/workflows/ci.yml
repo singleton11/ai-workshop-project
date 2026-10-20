@@ -1,0 +1,29 @@
+# CI for your Skill Atlas repository: the typecheck, the tests and the CLI itself, on every push
+# and pull request, on a clean machine. A pull request is ready when this is green.
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # The real CLI on the fixture repository, as a user would run it: it must exit 0.
+      - name: Smoke test
+        run: |
+          ./skill-atlas help
+          ./skill-atlas scan ./fixture
