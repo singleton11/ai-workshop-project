@@ -190,9 +190,18 @@ function client({ fetch, token }: GitHubOptions) {
     }
   }
 
+  /** An answer's body: fetch resolves once the headers are in, and the connection can still drop after. */
+  async function content<T>(url: string, read: () => Promise<T>): Promise<T> {
+    try {
+      return await read();
+    } catch (error) {
+      throw new AtlasError(`Cannot read GitHub's answer for ${url}: ${describe(error)}`);
+    }
+  }
+
   async function request(url: string, notFound: string): Promise<unknown> {
     const response = await get(url, { headers });
-    if (response.ok) return response.json();
+    if (response.ok) return content(url, () => response.json());
     const body: unknown = await response.json().catch(() => undefined);
     const message = (body as { message?: unknown } | undefined)?.message;
     const text = typeof message === 'string' ? message : '';
@@ -215,7 +224,7 @@ function client({ fetch, token }: GitHubOptions) {
       const response = await get(url);
       if (response.status === 404) return undefined;
       if (!response.ok) throw new AtlasError(`GitHub answered ${response.status} for ${url}`);
-      return new Uint8Array(await response.arrayBuffer());
+      return new Uint8Array(await content(url, () => response.arrayBuffer()));
     },
   };
 }

@@ -2,7 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { run, type RulesStore } from '../src/commands.ts';
-import { openGitHub, parseGitHubUrl } from '../src/core/github.ts';
+import { openGitHub, parseGitHubUrl, type Fetch } from '../src/core/github.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { DEFAULT_RULES } from '../src/core/rules.ts';
 import { openDirectory } from '../src/local.ts';
@@ -43,6 +43,8 @@ export const EXAMPLE: Recording = {
 export type AtlasOptions = {
   /** More recorded GitHub answers, next to EXAMPLE. */
   recording?: Recording;
+  /** What answers a URL that is not recorded. */
+  fallback?: Fetch;
   /** Without a token, GitHub is listed through the tree. */
   token?: string;
   /** The rules: the defaults, kept in memory, unless given. */
@@ -58,7 +60,7 @@ export const DEFAULTS: RulesStore = {
 
 /** `skill-atlas <args>`, as the CLI runs it, with GitHub answering from EXAMPLE. */
 export async function atlas(args: string[], options: AtlasOptions = {}) {
-  const github = replay({ ...EXAMPLE, ...options.recording });
+  const github = replay({ ...EXAMPLE, ...options.recording }, options.fallback);
   const token = 'token' in options ? options.token : 'test';
   const stdout: string[] = [];
   const stderr: string[] = [];

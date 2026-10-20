@@ -1,6 +1,8 @@
 // spec/analysis.md, "An error partway does not lose what was read", and its CLI output, spec/cli.md:
 // GitHub fails in the middle of a scan, after the repository and its commit are known.
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import type { Fetch } from '../src/core/github.ts';
 import { openGitHub } from '../src/core/github.ts';
@@ -149,4 +151,57 @@ test('the tree itself fails: 0 skills, then the error; before the commit is know
   assert.equal(early.code, 1);
   assert.equal(early.stdout, '');
   assert.equal(early.stderr, 'GitHub rate limit reached; set GITHUB_TOKEN');
+});
+
+/**
+ * Answers every URL it is given with 200 and the start of a body, then closes the connection:
+ * fetch resolves with the headers, and reading the body fails.
+ */
+async function brokenOff(): Promise<{ fetch: Fetch; close: () => Promise<void> }> {
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': '1000' });
+    response.write('{"total_count": 150, "items": [', () => response.socket?.destroy());
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    fetch: (_, init) => fetch(`http://127.0.0.1:${port}/`, init),
+    close: () => new Promise((resolve) => server.close(() => resolve())),
+  };
+}
+
+test('the connection drops while a SKILL.md downloads: the skills read before it, then "scan incomplete"', async () => {
+  const server = await brokenOff();
+  try {
+    const recording = {
+      ...OPEN,
+      [`${API}/git/trees/${COMMIT}?recursive=1`]: tree([file('.claude/skills/alpha/SKILL.md'), file('.claude/skills/beta/SKILL.md')]),
+      [`${RAW}/.claude/skills/alpha/SKILL.md`]: skill('alpha', 'The first skill.'),
+      // beta is not recorded: its headers arrive, then its body breaks off.
+    };
+    const result = await atlas(['scan', 'github.com/acme/flaky'], { recording, token: undefined, fallback: server.fetch });
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, ['acme/flaky · 1 skill', 'alpha — The first skill.', `  https://github.com/acme/flaky/blob/${COMMIT}/.claude/skills/alpha/SKILL.md`].join('\n'));
+    assert.match(result.stderr, new RegExp(`^scan incomplete: Cannot read GitHub's answer for ${RAW}/\\.claude/skills/beta/SKILL\\.md: \\S`));
+  } finally {
+    await server.close();
+  }
+});
+
+test('the connection drops while a code search page downloads: the pages before it are kept', async () => {
+  const server = await brokenOff();
+  try {
+    const recording = {
+      ...OPEN,
+      [`${SEARCH}&page=1`]: PAGE_1,
+      // Page 2 is not recorded: its headers arrive, then its body breaks off.
+      [`${RAW}/.claude/skills/alpha/SKILL.md`]: skill('alpha', 'The first skill.'),
+    };
+    const result = await atlas(['scan', 'https://github.com/acme/flaky'], { recording, fallback: server.fetch });
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout.split('\n')[0], 'acme/flaky · 1 skill');
+    assert.match(result.stderr.split('\n').at(-1)!, /^scan incomplete: Cannot read GitHub's answer for https:\/\/api\.github\.com\/search\/code\?.*&page=2: \S/);
+  } finally {
+    await server.close();
+  }
 });

@@ -24,8 +24,9 @@ Web: a thin client too, [web.md](web.md).
   (`a: &m { self: *m }`)
 - Unreachable repository → a clear message, exit code 1
 - **An error partway does not lose what was read.** Once the repository and its commit are known,
-  a failure (rate limit, no network, a GitHub error) while listing or reading the files ends the
-  scan with that *error*, but the skills read before it are kept, with their warnings. Code search
+  a failure (rate limit, no network, a connection that drops while an answer downloads, a GitHub
+  error) while listing or reading the files ends the scan with that *error*, but the skills read
+  before it are kept, with their warnings. Code search
   keeps the pages before the one that failed; a tree folder that fails adds nothing, the others do;
   a `SKILL.md` or link that cannot be read is left out, not warned about as missing. After a failed
   code search, no symbolic links are looked for: they could point at a file it did not reach.
