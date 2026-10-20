@@ -1,0 +1,39 @@
+### /tmp/main-wt
+$ skill-atlas scan --filter bug https://github.com/JetBrains/MPS
+GitHub answered 500 for https://raw.githubusercontent.com/JetBrains/MPS/d7e4f5c1394535b05e90dde6e3e7e8a3f3e174a2/.agents/skills/bugfix-workflow/SKILL.md
+(exit 1)
+### /workspaces/ai-workshop-project
+$ skill-atlas scan --filter bug https://github.com/JetBrains/MPS
+JetBrains/MPS · 10 of 41 skills
+debugging — Debugging techniques and tools for IntelliJ development.
+  https://github.com/JetBrains/MPS/blob/d7e4f5c1394535b05e90dde6e3e7e8a3f3e174a2/.agents/skills/debugging/SKILL.md
+  also in .claude/skills/debugging/SKILL.md
+mps-aspect-dataflow — Use when defining or debugging MPS dataflow builders for a concept — control/data flow declarations that drive reachability analysis and variable-use checking.
+  https://github.com/JetBrains/MPS/blob/d7e4f5c1394535b05e90dde6e3e7e8a3f3e174a2/.agents/skills/mps-aspect-dataflow/SKILL.md
+  also in .claude/skills/mps-aspect-dataflow/SKILL.md, plugins/mcp-tools/resources/jetbrains/mps/agents/mcp/skills/mps-aspect-dataflow/SKILL.md
+mps-aspect-generation-plan — Use when defining or modifying an MPS generation plan — explicit ordering of generators, checkpoints for cross-model reference resolution, forks for parallel branches, IncludePlan composition, conditional PlanContribution activation, ParameterEquals/ConceptListSelector fork selectors, and InitModelAttributes for targetFacet routing.
+  https://github.com/JetBrains/MPS/blob/d7e4f5c1394535b05e90dde6e3e7e8a3f3e174a2/.agents/skills/mps-aspect-generation-plan/SKILL.md
+  also in .claude/skills/mps-aspect-generation-plan/SKILL.md, plugins/mcp-tools/resources/jetbrains/mps/agents/mcp/skills/mps-aspect-generation-plan/SKILL.md
+mps-aspect-generator — Use when defining or modifying MPS generators — author a generator module, add or edit root/reduction/weaving/pattern mapping rules, attach template macros ($COPY_SRC, $LOOP, $IF, $PROPERTY, $REF, $SWITCH, $MAP_SRC, $WEAVE, $INSERT, $LABEL, $TRACE, $VAR), wire mapping labels, build template switches, write pre/post mapping scripts, navigate `genContext`, or debug "rule didn't fire", missing references, empty output, infinite reduction loops, and generated-Java compile failures.
+  https://github.com/JetBrains/MPS/blob/d7e4f5c1394535b05e90dde6e3e7e8a3f3e174a2/.agents/skills/mps-aspect-generator/SKILL.md
+  also in .claude/skills/mps-aspect-generator/SKILL.md, plugins/mcp-tools/resources/jetbrains/mps/agents/mcp/skills/mps-aspect-generator/SKILL.md
+mps-aspect-intentions — Use when defining or editing MPS intentions (the Alt+Enter context-action aspect) — adding `IntentionDeclaration` roots, parameterized or surround-with variants, description/isApplicable/execute blocks, child-filter functions, factory-initialized AST splicing, or debugging why an intention is not offered.
+  https://github.com/JetBrains/MPS/blob/d7e4f5c1394535b05e90dde6e3e7e8a3f3e174a2/.agents/skills/mps-aspect-intentions/SKILL.md
+  also in .claude/skills/mps-aspect-intentions/SKILL.md, plugins/mcp-tools/resources/jetbrains/mps/agents/mcp/skills/mps-aspect-intentions/SKILL.md
+mps-aspect-migrations — Use when authoring or debugging MPS migration scripts that upgrade user models after a language definition changes — covers jetbrains.mps.lang.migration (MigrationScript class-based, PureMigrationScript declarative, MoveConcept/MoveContainmentLink/MoveReferenceLink/MoveProperty, ordering via OrderDependency, data exchange via putData/getData, RefactoringLog, ConceptMigrationReference) and jetbrains.mps.lang.script Enhancement Scripts (MigrationScript with MigrationScriptPart_Instance, ExtractInterfaceMigration, FactoryMigrationScriptPart, CommentMigrationScriptPart) — when a model needs version-gated upgrade, concept rename or removal, link or property rename, instance-level transformation, or composition of migration steps.
+  https://github.com/JetBrains/MPS/blob/d7e4f5c1394535b05e90dde6e3e7e8a3f3e174a2/.agents/skills/mps-aspect-migrations/SKILL.md
+  also in .claude/skills/mps-aspect-migrations/SKILL.md, plugins/mcp-tools/resources/jetbrains/mps/agents/mcp/skills/mps-aspect-migrations/SKILL.md
+mps-aspect-textgen — Use when authoring or debugging MPS TextGen — concept-to-plain-text serialisation for languages whose final output is text (source files, config, scripts, DDL, XML, markdown).
+  https://github.com/JetBrains/MPS/blob/d7e4f5c1394535b05e90dde6e3e7e8a3f3e174a2/.agents/skills/mps-aspect-textgen/SKILL.md
+  also in .claude/skills/mps-aspect-textgen/SKILL.md, plugins/mcp-tools/resources/jetbrains/mps/agents/mcp/skills/mps-aspect-textgen/SKILL.md
+mps-aspect-typesystem — Use when authoring or debugging MPS typesystem — inference rules (`typeof :==: / :<=: / :>=:`), `SubtypingRule`, `ComparisonRule`, `InequationReplacementRule`, `SubstituteTypeRule`, `WhenConcreteStatement` blocks, `NonTypesystemRule` checking rules, `TypesystemQuickFix`, error/warning/info reports with `messageTarget` highlighting and quick-fix wiring (`helginsIntention`), and shared BaseLanguage helpers in the typesystem model.
+  https://github.com/JetBrains/MPS/blob/d7e4f5c1394535b05e90dde6e3e7e8a3f3e174a2/.agents/skills/mps-aspect-typesystem/SKILL.md
+  also in .claude/skills/mps-aspect-typesystem/SKILL.md, plugins/mcp-tools/resources/jetbrains/mps/agents/mcp/skills/mps-aspect-typesystem/SKILL.md
+mps-distribution-build — Use when bundling a new plain Java/Kotlin plugin into MPS distribution archives, debugging packaging/layout issues in `build/mps*.xml`, tracing where per-plugin artefacts end up, or editing `plugins/mps-build/solutions/mpsBuild/models/build.mps` (the source of truth that generates every `build/mps*.xml`).
+  https://github.com/JetBrains/MPS/blob/d7e4f5c1394535b05e90dde6e3e7e8a3f3e174a2/.agents/skills/mps-distribution-build/SKILL.md
+  also in .claude/skills/mps-distribution-build/SKILL.md, plugins/mcp-tools/resources/jetbrains/mps/agents/mcp/skills/mps-distribution-build/SKILL.md
+mps-quotations — Use when writing or debugging MPS quotations and anti-quotations — "node literals" that create SNode trees inline in behavior, typesystem, intentions, generator, and other model code.
+  https://github.com/JetBrains/MPS/blob/d7e4f5c1394535b05e90dde6e3e7e8a3f3e174a2/.agents/skills/mps-quotations/SKILL.md
+  also in .claude/skills/mps-quotations/SKILL.md, plugins/mcp-tools/resources/jetbrains/mps/agents/mcp/skills/mps-quotations/SKILL.md
+scan incomplete: GitHub answered 500 for https://raw.githubusercontent.com/JetBrains/MPS/d7e4f5c1394535b05e90dde6e3e7e8a3f3e174a2/.agents/skills/bugfix-workflow/SKILL.md
+(exit 1)
