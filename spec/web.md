@@ -22,8 +22,10 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
 - An organization's repositories are added **as each one is scanned**, not once all of them are:
   kept in the organization's order whichever finishes first, its totals counting what is in so far, with
   `scanned N of M` while it goes on. Its warnings come at the end. A skill open in the address shows
-  as soon as its repository is in. A repository on its own comes at once: which copy of a skill is
-  its main path, and its id, are known only when all its `SKILL.md` files are read.
+  as soon as its repository is in. The organization is in the address as soon as it shows, so a
+  card opened while the scan goes on can be reloaded or shared. A repository on its own comes at
+  once: which copy of a skill is its main path, and its id, are known only when all its `SKILL.md`
+  files are read.
 - If an organization's scan stops on the way (rate limit, a rejected token, no network: it stops the
   CLI's too), what it added is taken out again: the error is shown under the input, the catalog as it was.
 - Warnings are shown with their repository, or their organization; an error (not found, rate limit,

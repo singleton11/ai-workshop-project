@@ -577,6 +577,37 @@ test('the page: an organization\'s repositories show up as each is scanned, in i
   assert.equal(p.text('#scan-button'), 'Scan');
 });
 
+test('the page: a card opened while its organization is still being scanned has an address that scans it again', async (t) => {
+  const held = 'https://api.github.com/repos/acme/other/commits/trunk';
+  const server = await holding([held]);
+  t.after(server.close);
+  const p = await page('', server.address);
+  (p.$('#scan-url') as HTMLInputElement).value = 'github.com/acme';
+  (p.$('#scan-form') as HTMLFormElement).requestSubmit();
+  // acme/tools is in, acme/other still being scanned: the organization is in the address already.
+  const id = 'acme/tools:skills/deploy/SKILL.md';
+  await until(() => p.$(`[data-organization="acme"] [data-skill="${id}"]`) !== null);
+  assert.deepEqual(p.params(), ['https://github.com/acme']);
+  p.$(`[data-organization="acme"] [data-skill="${id}"]`)?.click();
+  await until(() => p.text('#skill-view h1') === 'deploy');
+  assert.deepEqual(p.params(), ['https://github.com/acme']);
+  assert.equal(p.$('[aria-busy]') !== null || p.text('#scan-button') === 'Scanning…', true);
+
+  // A reload of that address, before the first scan is done, scans the organization and opens the skill.
+  const address = p.window.location.href.slice(server.address.length);
+  const reloaded = await page(address, server.address);
+  await until(() => reloaded.text('#skill-view h1') === 'deploy');
+  assert.equal(reloaded.text('#skill-view .lead'), 'Ship to production. Carefully.');
+
+  // Back, while the scan goes on, is the catalog with the organization in its address.
+  (p.$('#skill-view .back') as HTMLButtonElement).click();
+  await until(() => p.$('#catalog-view')?.hidden === false);
+  assert.deepEqual(p.params(), ['https://github.com/acme']);
+  server.release(held);
+  await until(() => !p.$('[aria-busy]') && !reloaded.$('[aria-busy]'));
+  assert.deepEqual(p.params(), ['https://github.com/acme']);
+});
+
 test('the page: an organization that fails on the way is an error under the input, and the catalog as it was', async (t) => {
   // acme/lost answers with the rate limit, once acme/tools is on the page.
   const held = 'https://api.github.com/repos/acme/lost/commits/main';

@@ -51,7 +51,10 @@ async function scan(input) {
   // Where the scan goes, and what was there before it, to put back if it fails.
   let target = entry;
   let previous = entry.scan;
-  /** The scan's result so far: another URL for an entry already here replaces that one, where it was. */
+  /**
+   * The scan's result so far: another URL for an entry already here replaces that one, where it was.
+   * It goes into the address before its cards can be opened; a failure takes it out again.
+   */
   const show = (result) => {
     const same = entries.find((other) => other !== entry && other.scan?.source === result.source);
     if (same && same !== target) {
@@ -61,6 +64,7 @@ async function scan(input) {
       same.loading = true;
     }
     Object.assign(target, { key: result.source, scan: result });
+    saveAddress();
   };
   try {
     const response = await fetch(`/api/scan?url=${encodeURIComponent(input)}`, { headers: { Accept: 'application/x-ndjson, application/json' } });
