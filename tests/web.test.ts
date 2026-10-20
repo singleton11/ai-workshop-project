@@ -441,6 +441,31 @@ test('the page: a skill of an organization opens, and a reload of its address sc
   assert.deepEqual(p.texts('[data-organization="acme"] .repository .repository-name'), ['acme/other', 'acme/tools']);
 });
 
+test('the page: the same skill in two entries, at two commits: each card opens its own, and so does a reload', async () => {
+  const p = await page();
+  await p.scan('github.com/acme'); // acme/tools at main
+  await p.scan('https://github.com/acme/tools/tree/v1'); // the same skill, at v1
+  const id = 'acme/tools:skills/deploy/SKILL.md';
+  const opened = async (card: HTMLElement | null) => {
+    card?.click();
+    await until(() => p.$('#skill-view')?.hidden === false);
+    const result = { lead: p.text('#skill-view .lead'), link: p.$('#skill-view [data-link]')?.getAttribute('href'), hash: p.window.location.hash };
+    (p.$('#skill-view .back') as HTMLButtonElement).click();
+    await until(() => p.$('#catalog-view')?.hidden === false);
+    return result;
+  };
+  const tagged = await opened(p.$(`#repositories > [data-repository="acme/tools"] [data-skill="${id}"]`));
+  assert.equal(tagged.lead, 'The old deploy.');
+  assert.equal(tagged.link, `https://github.com/acme/tools/blob/${TAGGED}/skills/deploy/SKILL.md`);
+  const organization = await opened(p.$(`[data-organization="acme"] [data-skill="${id}"]`));
+  assert.equal(organization.lead, 'Ship to production. Carefully.');
+  assert.equal(organization.link, `https://github.com/acme/tools/blob/${COMMIT}/skills/deploy/SKILL.md`);
+
+  const reloaded = await page(`?repo=github.com/acme&repo=${encodeURIComponent('https://github.com/acme/tools/tree/v1')}${tagged.hash}`);
+  await until(() => reloaded.text('#skill-view h1') === 'deploy');
+  assert.equal(reloaded.text('#skill-view .lead'), 'The old deploy.');
+});
+
 test('the page: an unknown organization is an error under the input, and the catalog as it was', async () => {
   const p = await page();
   await p.scan('github.com/acme/other');

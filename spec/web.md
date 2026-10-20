@@ -36,7 +36,10 @@ root-relative ones (`/docs/x.md`), against the repository root at that commit, a
 ## Nothing is stored
 
 The scanned URLs are in the page's address (`?repo=<url>&repo=<url>`, the open skill as
-`#<skill id>`), so a reload or a shared link scans them again. The server keeps no result.
+`#in=<source>&skill=<skill id>`), so a reload or a shared link scans them again. The server keeps no result.
+`<source>` is the catalog entry the card was in: the same skill can be in two entries at two
+commits (an organization and one of its repositories on its own, or a repository at two refs), and
+each card opens its own. A bare `#<skill id>` opens its first copy in the catalog.
 
 ## API
 

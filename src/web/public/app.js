@@ -1,6 +1,7 @@
 // The catalog page: paste a GitHub URL, of a repository or of an organization, the skills fill the
 // catalog; a card opens its skill.
-// Nothing is stored: the scanned URLs live in the address, `?repo=<url>`, the open skill in `#<id>`.
+// Nothing is stored: the scanned URLs live in the address, `?repo=<url>`, the open skill in
+// `#in=<entry's source>&skill=<id>`: the same skill can be in two entries, at two commits.
 // spec/web.md.
 
 /** @typedef {{ id: string, name: string, description: string, summary: string, path: string, link: string,
@@ -93,8 +94,18 @@ function saveAddress() {
   history.replaceState(history.state, '', `${location.pathname}${search}${location.hash}`);
 }
 
-function openSkillId() {
-  return location.hash.length > 1 ? decodeURIComponent(location.hash.slice(1)) : '';
+/** The open skill: its id, and the source of the catalog entry it was opened from, if the address says. */
+function openSkill() {
+  const hash = location.hash.slice(1);
+  if (!hash) return undefined;
+  const params = new URLSearchParams(hash);
+  if (params.has('skill')) return { id: params.get('skill'), source: params.get('in') ?? undefined };
+  return { id: decodeURIComponent(hash) }; // `#<id>`: the first copy in the catalog
+}
+
+/** The address of a skill of the entry with this source. */
+function skillHash(source, id) {
+  return `#${new URLSearchParams({ in: source, skill: id })}`;
 }
 
 /** A repository's scan, or each of an organization's repositories. @returns {Scan[]} */
@@ -103,8 +114,9 @@ function repositoriesOf(scan) {
   return 'repositories' in scan ? scan.repositories : [scan];
 }
 
-function findSkill(id) {
+function findSkill({ id, source }) {
   for (const entry of entries) {
+    if (source !== undefined && (entry.scan?.source ?? entry.key) !== source) continue;
     for (const scan of repositoriesOf(entry.scan)) {
       const skill = scan.skills.find((skill) => skill.id === id);
       if (skill) return { skill, scan };
@@ -116,10 +128,10 @@ function findSkill(id) {
 // Rendering
 
 function render() {
-  const id = openSkillId();
-  $('catalog-view').hidden = Boolean(id);
-  $('skill-view').hidden = !id;
-  if (id) renderSkill(id);
+  const open = openSkill();
+  $('catalog-view').hidden = Boolean(open);
+  $('skill-view').hidden = !open;
+  if (open) renderSkill(open);
   else renderCatalog();
 }
 
@@ -147,7 +159,7 @@ function renderEntry(entry) {
       h('div', { class: 'grid' }, h('div', { class: 'card card-loading' }, h('span', {}, h('span', { class: 'spinner' }), ' Scanning…'))));
   }
   if ('repositories' in scan) return renderOrganization(entry, scan);
-  return renderRepository(scan, entry);
+  return renderRepository(scan, scan.source, entry);
 }
 
 /** An organization: its repositories with skills, each as a repository of its own, removed together. */
@@ -162,7 +174,7 @@ function renderOrganization(entry, scan) {
       removeButton(entry, scan.owner.id)),
     renderWarnings(scan.warnings),
     scan.repositories.length > 0
-      ? scan.repositories.map((repository) => renderRepository(repository))
+      ? scan.repositories.map((repository) => renderRepository(repository, scan.source))
       : h('p', { class: 'muted' }, 'No skills in its repositories.'));
 }
 
@@ -173,9 +185,10 @@ function organizationSummary(skills, withSkills, listed) {
 
 /**
  * @param {Scan} scan
+ * @param {string} origin the source of the catalog entry it is in, for its cards' addresses
  * @param {Entry} [entry] the catalog entry it is, to remove; none for an organization's repository
  */
-function renderRepository(scan, entry) {
+function renderRepository(scan, origin, entry) {
   const skills = scan.skills.filter(matches);
   const label = scan.skills.length === 1 ? '1 skill' : `${scan.skills.length} skills`;
   return h('section', { class: 'repository', 'data-repository': scan.repository.id, 'aria-busy': entry?.loading ? 'true' : undefined },
@@ -189,7 +202,7 @@ function renderRepository(scan, entry) {
       entry && removeButton(entry, scan.repository.id)),
     renderWarnings(scan.warnings),
     skills.length > 0
-      ? h('div', { class: 'grid' }, skills.map(renderCard))
+      ? h('div', { class: 'grid' }, skills.map((skill) => renderCard(skill, origin)))
       : h('p', { class: 'muted' }, scan.skills.length ? 'No skill matches the filter.' : 'No skills in this repository.'));
 }
 
@@ -203,9 +216,9 @@ function renderWarnings(warnings) {
     h('ul', {}, warnings.map((warning) => h('li', {}, warning))));
 }
 
-/** @param {Skill} skill */
-function renderCard(skill) {
-  return h('a', { class: 'card', href: `#${encodeURIComponent(skill.id)}`, 'data-skill': skill.id, onclick: () => {
+/** @param {Skill} skill @param {string} origin */
+function renderCard(skill, origin) {
+  return h('a', { class: 'card', href: skillHash(origin, skill.id), 'data-skill': skill.id, onclick: () => {
       catalogScroll = scrollY;
       openedFromCatalog = true;
     } },
@@ -214,15 +227,15 @@ function renderCard(skill) {
     h('span', { class: 'card-path' }, skill.path));
 }
 
-function renderSkill(id) {
-  const found = findSkill(id);
+function renderSkill(open) {
+  const found = findSkill(open);
   const back = h('button', { class: 'button back', type: 'button', onclick: closeSkill }, '← Back to the catalog');
   if (!found) {
     const loading = entries.some((entry) => entry.loading);
     $('skill-view').replaceChildren(back,
       h('div', { class: 'empty' }, loading
         ? h('p', {}, h('span', { class: 'spinner' }), ' Scanning…')
-        : h('p', { class: 'empty-title' }, `${id} is not in the catalog`)));
+        : h('p', { class: 'empty-title' }, `${open.id} is not in the catalog`)));
     return;
   }
   const { skill, scan } = found;
@@ -272,12 +285,12 @@ $('filter').addEventListener('input', (event) => {
 });
 document.querySelector('[data-home]').addEventListener('click', (event) => {
   event.preventDefault();
-  if (openSkillId()) closeSkill();
+  if (openSkill()) closeSkill();
 });
 addEventListener('hashchange', () => {
   const wasOpen = !$('skill-view').hidden;
   render();
-  if (wasOpen && !openSkillId()) {
+  if (wasOpen && !openSkill()) {
     openedFromCatalog = false;
     scrollTo(0, catalogScroll);
   }
