@@ -85,11 +85,11 @@ export async function scan(source: Source, rules: Rules, found?: (skill: Skill) 
       byText.set(text, skill);
       skills.push(skill);
       // The file read, not the path: a path through a symbolic link has no history of its own.
-      const date = readDate(source, file, dateErrors);
-      heard = heard.then(async () => {
+      const date = observed(readDate(source, file, dateErrors));
+      heard = observed(heard.then(async () => {
         skill.updated = (await date) ?? '';
         found?.({ ...skill, copies: [] });
-      });
+      }));
     }
   };
   await Promise.all(
@@ -152,6 +152,17 @@ async function readDate(source: Source, file: string, errors: Map<string, string
     errors.set(file, error.message);
     return undefined;
   }
+}
+
+/**
+ * The promise, its rejection handled from now on, yet still thrown to whoever awaits it. A cancelled
+ * scan rejects every date being read: the first rejection stops `heard`, so the dates after it would
+ * never be awaited, and an unhandled rejection ends the process; so would `heard` itself, once
+ * reading a file has failed the scan before it is awaited.
+ */
+function observed<T>(promise: Promise<T>): Promise<T> {
+  promise.catch(() => {});
+  return promise;
 }
 
 /** Without a UTF-8 BOM, and with LF line endings: what makes two copies identical. */

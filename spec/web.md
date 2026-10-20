@@ -106,6 +106,7 @@ status and body are as without the header (an unknown owner is still a `422`). A
 first line is out once its owner is found, so a failure listing its repositories is a line too.
 A page that goes away before its answer is done (*Remove* on an entry being scanned, a closed tab)
 stops the scan on the server too: nothing more is asked of GitHub for it, the requests under way are
-cancelled, and no repository of an organization still waiting its turn is opened.
+cancelled, and no repository of an organization still waiting its turn is opened. Only that scan
+stops: the server goes on, and so do the other pages' scans, even when skills' dates are being read.
 A bad or missing URL, or a local path → `400 { error }`; any other failure the CLI explains
 (not found, rate limit, broken rules file) → `422 { error }`, with the CLI's message.

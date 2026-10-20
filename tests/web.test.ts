@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { createBrowserBackend } from '../src/browser.ts';
@@ -16,6 +17,10 @@ const COMMIT = '1111111111111111111111111111111111111111';
 const TAGGED = '2222222222222222222222222222222222222222';
 const OTHER = '3333333333333333333333333333333333333333';
 const FLAKY = '4444444444444444444444444444444444444444';
+
+/** GitHub for the CLI's own process: answers from NET, a file's history held back (tests/held-history.mjs). */
+const HELD_HISTORY = fileURLToPath(new URL('./held-history.mjs', import.meta.url));
+const NET = fileURLToPath(new URL('./visual/net.json', import.meta.url));
 
 const REVIEW = `---
 name: review
@@ -553,6 +558,35 @@ test('serve: prints its address and answers there', async () => {
     const address = /^Skill Atlas: (http:\/\/localhost:\d+\/)$/m.exec(line)?.[1];
     assert.ok(address, line);
     assert.equal((await fetch(address)).status, 200);
+  } finally {
+    child.kill();
+  }
+});
+
+test('serve: a page that goes away while skills\' dates are being read stops its scan, and the server goes on', async () => {
+  // anthropics/skills as recorded for the demos; every SKILL.md's history is held back until aborted.
+  const child = spawn(process.execPath, ['--import', HELD_HISTORY, CLI, 'serve', '--port', '0'], {
+    env: { ...process.env, SKILL_ATLAS_RULES: '/dev/null', GITHUB_TOKEN: '', REPLAY: NET },
+  });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => (stderr += chunk));
+  const exited = new Promise<number | null>((resolve) => child.on('exit', resolve));
+  try {
+    const line = await new Promise<string>((resolve) => child.stdout.once('data', (chunk) => resolve(String(chunk))));
+    const address = /^Skill Atlas: (http:\/\/localhost:\d+\/)$/m.exec(line)?.[1];
+    assert.ok(address, line);
+    const controller = new AbortController();
+    const response = await fetch(`${address}api/scan?url=${encodeURIComponent('https://github.com/anthropics/skills')}`, {
+      headers: { Accept: 'application/x-ndjson' },
+      signal: controller.signal,
+    });
+    response.body!.getReader().read().catch(() => {});
+    await until(() => (stderr.match(/^held /gm) ?? []).length === 19);
+    controller.abort();
+    const code = await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve('running'), 500))]);
+    assert.equal(code, 'running', stderr);
+    assert.equal((await fetch(address)).status, 200);
+    assert.doesNotMatch(stderr, /AbortError|Error/);
   } finally {
     child.kill();
   }
