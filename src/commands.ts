@@ -27,10 +27,12 @@ export type Context = {
 
 const usage = `Usage: skill-atlas <command>
 
-  scan [--rules <file>] <GitHub URL | directory>   find every skill in a repository, or in all of an organization's, and print it
-  rules [--defaults]                               show the rules file: what is a skill, and what is not
-  serve [--port <n>]                               open the catalog in a browser, at http://localhost:4173/
-  help                                             show this help`;
+  scan [--rules <file>] [--filter <text>] <GitHub URL | directory>
+                                  find every skill in a repository or organization; --filter keeps
+                                  skills whose name, description or path contains the text
+  rules [--defaults]              show the rules file: what is a skill, and what is not
+  serve [--port <n>]              open the catalog in a browser, at http://localhost:4173/
+  help                            show this help`;
 
 /** Runs one command; returns its exit code. */
 export async function run(args: string[], context: Context): Promise<number> {
@@ -50,22 +52,26 @@ export async function run(args: string[], context: Context): Promise<number> {
 }
 
 async function scanCommand(args: string[], context: Context) {
-  const usage = 'Usage: skill-atlas scan [--rules <file>] <GitHub URL | directory>';
+  const usage = 'Usage: skill-atlas scan [--rules <file>] [--filter <text>] <GitHub URL | directory>';
   let explicit: string | undefined;
+  let filter: string | undefined;
   const inputs: string[] = [];
   for (let i = 0; i < args.length; i++) {
-    if (args[i] !== '--rules') inputs.push(args[i]);
-    else if (i + 1 < args.length && explicit === undefined) explicit = args[++i];
-    else throw new AtlasError(usage);
+    if (args[i] === '--rules' && i + 1 < args.length && explicit === undefined) explicit = args[++i];
+    else if (args[i] === '--filter' && i + 1 < args.length && filter === undefined) filter = args[++i];
+    else if (args[i] === '--rules' || args[i] === '--filter') throw new AtlasError(usage);
+    else inputs.push(args[i]);
   }
   if (inputs.length !== 1) throw new AtlasError(usage);
   // The rules first: a broken rules file stops the scan before anything is fetched.
   const file = await context.rules.load(explicit, context.error);
   const rules = parseRules(file.text, file.path);
+  const text = filter?.trim().toLowerCase() ?? '';
   const opened = await context.open(inputs[0]);
-  if ('repositories' in opened) return printOrganization(await scanOrganization(opened, rules), context);
+  if ('repositories' in opened) return printOrganization(await scanOrganization(opened, rules), context, text);
   const result = await scan(opened, rules);
-  printRepository(result.repository, result.skills, context);
+  const skills = text ? result.skills.filter((skill) => matches(skill, text)) : result.skills;
+  printRepository(result.repository, skills, text ? result.skills.length : undefined, context);
   for (const warning of result.warnings) context.error(`warning: ${warning}`);
 }
 
@@ -88,9 +94,15 @@ async function serveCommand(args: string[], context: Context) {
   context.print(`Skill Atlas: ${await context.serve(port)}`);
 }
 
-/** `<owner>/<repo> · N skills`, then each skill's name, first sentence and link. */
-function printRepository(repository: Repository, skills: Skill[], { print }: Context) {
-  print(`${repository.id} · ${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}`);
+/** `--filter`: the name, the description or the path contains the text, in any letter case. */
+function matches(skill: Skill, text: string): boolean {
+  return [skill.name, skill.description, skill.path].some((field) => field.toLowerCase().includes(text));
+}
+
+/** `<owner>/<repo> · N skills` (`N of M skills` when filtered), then each skill's name, first sentence and link. */
+function printRepository(repository: Repository, skills: Skill[], total: number | undefined, { print }: Context) {
+  const count = total === undefined ? `${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}` : `${skills.length} of ${total} skills`;
+  print(`${repository.id} · ${count}`);
   for (const skill of skills) {
     print(skill.description ? `${skill.name} — ${firstSentence(skill.description)}` : skill.name);
     print(`  ${skillLink(repository, skill)}`);
@@ -99,12 +111,18 @@ function printRepository(repository: Repository, skills: Skill[], { print }: Con
 }
 
 /** `<owner> · N skills in M of K repositories`, then each repository with skills, as for one. */
-function printOrganization(result: OrganizationResult, context: Context) {
-  const skills = result.repositories.reduce((sum, repository) => sum + repository.skills.length, 0);
-  context.print(`${result.owner.id} · ${organizationSummary(skills, result.repositories.length, result.listed)}`);
-  for (const { repository, skills } of result.repositories) {
+function printOrganization(result: OrganizationResult, context: Context, filter = '') {
+  const repositories = result.repositories
+    .map((scanResult) => ({
+      scanResult,
+      skills: filter ? scanResult.skills.filter((skill) => matches(skill, filter)) : scanResult.skills,
+    }))
+    .filter(({ skills }) => skills.length > 0);
+  const skills = repositories.reduce((sum, repository) => sum + repository.skills.length, 0);
+  context.print(`${result.owner.id} · ${organizationSummary(skills, repositories.length, result.listed)}`);
+  for (const { scanResult, skills } of repositories) {
     context.print('');
-    printRepository(repository, skills, context);
+    printRepository(scanResult.repository, skills, filter ? scanResult.skills.length : undefined, context);
   }
   for (const { repository, warnings } of result.repositories) for (const warning of warnings) context.error(`warning: ${repository.id}: ${warning}`);
   for (const warning of result.warnings) context.error(`warning: ${warning}`);
