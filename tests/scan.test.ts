@@ -56,19 +56,22 @@ test('./fixture: every skill, sorted by name, linked to its file, with a warning
   assert.match(fixture.stderr, /^warning: \.agents\/skills\/release-checklist\/SKILL\.md: malformed front matter: /);
 });
 
-test('the CLI prints the result at once and stores nothing', (t) => {
+test('the CLI prints the result at once and stores nothing but the rules file', (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'skill-atlas-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
-  const scanned = spawnSync(process.execPath, [CLI, 'scan', FIXTURE], { cwd, encoding: 'utf8' });
+  const config = mkdtempSync(join(tmpdir(), 'skill-atlas-config-'));
+  t.after(() => [cwd, config].forEach((path) => rmSync(path, { recursive: true, force: true })));
+  const env = { ...process.env, XDG_CONFIG_HOME: config, SKILL_ATLAS_RULES: '' };
+  const scanned = spawnSync(process.execPath, [CLI, 'scan', FIXTURE], { cwd, env, encoding: 'utf8' });
   assert.equal(scanned.status, 0, scanned.stderr);
   assert.equal(scanned.stdout, `${fixture.stdout}\n`);
   assert.deepEqual(readdirSync(cwd), []);
+  assert.deepEqual(readdirSync(join(config, 'skill-atlas')), ['rules.yaml']);
 });
 
 test('unreachable repository → a clear message, exit code 1', async () => {
-  const missing = spawnSync(process.execPath, [CLI, 'scan', join(FIXTURE, 'no-such-directory')], { encoding: 'utf8' });
-  assert.equal(missing.status, 1);
-  assert.match(missing.stderr, /^Not a GitHub URL or a readable directory: .*no-such-directory\n$/);
+  const missing = await atlas(['scan', join(FIXTURE, 'no-such-directory')]);
+  assert.equal(missing.code, 1);
+  assert.match(missing.stderr, /^Not a GitHub URL or a readable directory: .*no-such-directory$/);
 
   // What GitHub answers for a repository that does not exist.
   const notFound = replay({ 'https://api.github.com/repos/JetBrains/no-such-repository': { status: 404, body: { message: 'Not Found' } } });

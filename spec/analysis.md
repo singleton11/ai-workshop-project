@@ -10,7 +10,8 @@ Every `SKILL.md`: **name**, **description**, **link**
 
 ## Architecture
 
-Core: fetch → find → parse. CLI: a *thin client*.
+Core: fetch → find ([rules](rules.md)) → parse. The rules are an input to the core; the core never
+reads or writes the rules file. CLI: a *thin client*; it loads the rules, or creates them.
 Skill: id = `repo:path`, name, description, commit
 
 ## Details
@@ -46,6 +47,7 @@ A copy in test data, or in a place that is not a skill, is neither listed nor sh
 - Identical skills are **one skill**. Its main path is the shortest one; on a tie, the one
   that sorts first (code-unit order). The link and the id use the main path; the other paths
   are its `copies`, in the same order. Because of this, a new, shorter copy changes the id.
+  A path through a symbolic link counts like any other: if it is the shortest, it is the main path.
 - Its name: the front matter, else the main path's folder. A front matter warning is given
   once, for the main path.
 - A **symbolic link** to a file or folder in the repository is a copy of its target.
@@ -54,7 +56,11 @@ A copy in test data, or in a place that is not a skill, is neither listed nor sh
        is listed at the link's path, and its target gets no "not a skill" or "test data" warning;
      - a link the rules reject is ignored, without a warning;
      - a link that points outside the repository, at nothing, or around in a loop gets a *warning* and is skipped.
-       Links are resolved from the file tree, on GitHub too, never by reading the link's file.
+  A link's target is what the link says (on GitHub, a mode `120000` entry's content); what the target
+  is, a file or a folder, comes from the file tree. With `GITHUB_TOKEN`, code search finds the files
+  but not the links; the links are looked for in `.agents/skills`, `.claude/skills`, `.github/skills`,
+  `agent/skills` and every outermost `skills` folder search found a skill in, not in the whole tree
+  (alone, it takes seconds on intellij-community). A link elsewhere is found without a token only.
 - **Same name, different content:** each group is listed, plus one warning per name:
   `<name>: N different skills share this name: <main paths>`. N counts groups, not files.
   `warnings.same-name: false` in the rules turns it off.

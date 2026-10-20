@@ -13,7 +13,9 @@ build-tools-bump-gradle-api — Bumps the Gradle API version that Kotlin Gradle 
 …
 ```
 
-Set `GITHUB_TOKEN` for a higher GitHub rate limit. `npm test` runs the tests.
+Set `GITHUB_TOKEN` for a higher GitHub rate limit. What is a skill, and what is test data, is set by
+[rules](spec/rules.md): the first scan writes them to `~/.config/skill-atlas/rules.yaml`, yours to edit;
+`./skill-atlas rules` shows them. `npm test` runs the tests.
 
 - [spec/](spec/): what it does. [AGENTS.md](AGENTS.md): the definition of done.
 - [fixture/](fixture/README.md): a small repository for the tests.

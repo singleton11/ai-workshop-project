@@ -1,7 +1,18 @@
 // The browser entry: the same commands, printed into the page, over live GitHub without a
 // token. No Node APIs here.
-import { run } from './commands.ts';
+import { run, type RulesStore } from './commands.ts';
+import { AtlasError } from './core/errors.ts';
 import { openGitHub, type Fetch } from './core/github.ts';
+import { DEFAULT_RULES } from './core/rules.ts';
+
+/** No file in the browser: the default rules, built in. */
+const builtInRules: RulesStore = {
+  load: async (explicit) => {
+    if (explicit) throw new AtlasError('--rules needs a file; there are no files here');
+    return { path: '<default rules>', text: DEFAULT_RULES };
+  },
+  peek: async () => ({}),
+};
 
 export type BrowserOptions = {
   /** Live GitHub; the page's own fetch by default. */
@@ -18,7 +29,7 @@ export function createBrowserBackend(options: BrowserOptions = {}) {
       const output: string[] = [];
       const write = (text: string) => output.push(text);
       try {
-        await run(words(commandLine), { open, print: write, error: write });
+        await run(words(commandLine), { open, print: write, error: write, rules: builtInRules });
       } catch (error) {
         write(`Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
       }

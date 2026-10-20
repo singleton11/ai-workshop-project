@@ -32,13 +32,30 @@ export async function openGitHub(input: string, options: GitHubOptions): Promise
   const id = info.full_name;
   const { sha } = await github.json<{ sha: string }>(`${API}/repos/${id}/commits/${encodePath(info.default_branch)}`);
   const warnings: string[] = [];
-  const paths = options.token ? await searchPaths(github, id) : await treePaths(github, id, sha, warnings);
+  let listing: Listing;
+  if (options.token) {
+    // Code search finds files, not symbolic links: those come from the folders a skill can be in.
+    // Not the whole tree: on a large repository it alone takes seconds.
+    const files = await searchPaths(github, id);
+    listing = { files, links: (await listFolders(github, id, sha, skillFolders(files))).links, truncated: false };
+  } else {
+    listing = await listTree(github, id, sha);
+    if (listing.truncated) {
+      warnings.push(`the tree is too large to list at once; looked only in ${SKILL_ROOTS.join(', ')} (GITHUB_TOKEN searches everywhere)`);
+    }
+  }
   const [organization, repo] = id.split('/');
   return {
     repository: { id, organization, name: repo, url: `https://github.com/${id}`, commit: sha },
-    paths,
+    paths: listing.files,
+    links: listing.links,
     warnings,
     read: (path) => github.raw(`${RAW}/${id}/${sha}/${encodePath(path)}`),
+    // A symbolic link's content is its target.
+    readLink: async (path) => {
+      const bytes = await github.raw(`${RAW}/${id}/${sha}/${encodePath(path)}`);
+      return bytes && new TextDecoder().decode(bytes).trim();
+    },
   };
 }
 
@@ -58,36 +75,64 @@ async function searchPaths(github: Client, id: string): Promise<string[]> {
 
 type Tree = { truncated: boolean; tree: { path: string; mode: string; type: string; sha: string }[] };
 
+type Listing = { files: string[]; links: string[]; truncated: boolean };
+
 /** The whole tree at once, or only the skill roots when it is too large for one answer. */
-async function treePaths(github: Client, id: string, sha: string, warnings: string[]): Promise<string[]> {
+async function listTree(github: Client, id: string, sha: string): Promise<Listing> {
   const tree = await github.json<Tree>(`${API}/repos/${id}/git/trees/${sha}?recursive=1`);
-  if (!tree.truncated) return files(tree);
-  warnings.push(`the tree is too large to list at once; looked only in ${SKILL_ROOTS.join(', ')} (GITHUB_TOKEN searches everywhere)`);
-  const paths: string[] = [];
-  for (const root of SKILL_ROOTS) {
-    const rootSha = await directory(github, id, sha, root);
-    if (!rootSha) continue;
-    const subtree = await github.json<Tree>(`${API}/repos/${id}/git/trees/${rootSha}?recursive=1`);
-    paths.push(...files(subtree).map((path) => `${root}/${path}`));
-  }
-  return paths;
+  if (!tree.truncated) return { ...entries(tree, ''), truncated: false };
+  return { ...(await listFolders(github, id, sha, SKILL_ROOTS)), truncated: true };
 }
 
-/** Walks down one level at a time; the directory's tree, or undefined if it does not exist. */
-async function directory(github: Client, id: string, sha: string, path: string): Promise<string | undefined> {
+/** The files and links in these folders, all of them at the same time; a missing folder adds nothing. */
+async function listFolders(github: Client, id: string, sha: string, folders: string[]): Promise<Omit<Listing, 'truncated'>> {
+  const found = await Promise.all(
+    folders.map(async (folder) => {
+      const found = await directory(github, id, sha, folder);
+      if (!found) return { files: [], links: [] };
+      if ('link' in found) return { files: [], links: [found.link] };
+      return entries(await github.json<Tree>(`${API}/repos/${id}/git/trees/${found.sha}?recursive=1`), `${folder}/`);
+    }),
+  );
+  return { files: found.flatMap((item) => item.files), links: [...new Set(found.flatMap((item) => item.links))] };
+}
+
+/** SKILL_ROOTS, and each outermost `skills` folder a found SKILL.md is in: where a link to a skill can be. */
+function skillFolders(files: string[]): string[] {
+  const folders = new Set(SKILL_ROOTS);
+  for (const file of files) {
+    const segments = file.split('/');
+    const index = segments.findIndex((segment, i) => i < segments.length - 1 && segment.toLowerCase() === 'skills');
+    if (index >= 0) folders.add(segments.slice(0, index + 1).join('/'));
+  }
+  const sorted = [...folders].sort();
+  return sorted.filter((folder) => !sorted.some((outer) => outer !== folder && folder.startsWith(`${outer}/`)));
+}
+
+/**
+ * Walks down one level at a time: the folder's tree; or, if the path goes through a symbolic link,
+ * that link's path; or undefined if there is no such folder.
+ */
+async function directory(github: Client, id: string, sha: string, path: string): Promise<{ sha: string } | { link: string } | undefined> {
   let current = sha;
-  for (const segment of path.split('/')) {
+  const segments = path.split('/');
+  for (const [index, segment] of segments.entries()) {
     const tree = await github.json<Tree>(`${API}/repos/${id}/git/trees/${current}`);
-    const entry = tree.tree.find((item) => item.path === segment && item.type === 'tree');
-    if (!entry) return undefined;
+    const entry = tree.tree.find((item) => item.path === segment);
+    if (entry?.mode === '120000') return { link: segments.slice(0, index + 1).join('/') };
+    if (entry?.type !== 'tree') return undefined;
     current = entry.sha;
   }
-  return current;
+  return { sha: current };
 }
 
-/** Regular files only: a symbolic link's content is its target, not a SKILL.md. */
-function files(tree: Tree): string[] {
-  return tree.tree.filter((item) => item.type === 'blob' && item.mode !== '120000').map((item) => item.path);
+/** Regular files, and symbolic links apart: a link's content is its target, not a SKILL.md. */
+function entries(tree: Tree, prefix: string): { files: string[]; links: string[] } {
+  const blobs = tree.tree.filter((item) => item.type === 'blob');
+  return {
+    files: blobs.filter((item) => item.mode !== '120000').map((item) => prefix + item.path),
+    links: blobs.filter((item) => item.mode === '120000').map((item) => prefix + item.path),
+  };
 }
 
 type Client = ReturnType<typeof client>;
