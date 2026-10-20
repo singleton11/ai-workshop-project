@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { createBrowserBackend } from '../src/browser.ts';
 import { openGitHub, parseGitHubOwnerUrl, parseGitHubUrl } from '../src/core/github.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
-import { atlas } from './helpers.ts';
+import { atlas, history, noHistory } from './helpers.ts';
 
 const TOOLS = '1111111111111111111111111111111111111111';
 const OTHER = '3333333333333333333333333333333333333333';
@@ -170,7 +170,7 @@ test('a repository that stops partway: its skills read before it, then "scan inc
 
 test('an organization, with a token: one code search, and only the repositories it finds a SKILL.md in are opened', async () => {
   const asked: string[] = [];
-  const github = replay({ ...ACME, ...ACME_SEARCH });
+  const github = replay({ ...ACME, ...ACME_SEARCH }, noHistory());
   const result = await atlas(['scan', 'github.com/acme'], {
     recording: ACME,
     token: 'test',
@@ -280,6 +280,23 @@ test('the rate limit stops the whole scan: a clear message, exit code 1, nothing
   assert.equal(result.stderr, 'GitHub rate limit reached; set GITHUB_TOKEN');
 });
 
+test('the rate limit on a skill\'s date stops the whole scan too; dates of the others are printed as for one repository', async () => {
+  const dates = `${API}/repos/acme/tools/commits?sha=${TOOLS}&path=skills/deploy/SKILL.md&per_page=1`;
+  const dated = await atlas(['scan', 'github.com/acme'], {
+    recording: { ...ACME, ...history('acme/Other', OTHER, '.claude/skills/triage/SKILL.md', '2026-04-05T06:07:08Z') },
+    token: undefined,
+  });
+  assert.equal(dated.code, 0, dated.stderr);
+  assert.match(dated.stdout, new RegExp(`\\ntriage — Sort new issues\\.\\n {2}updated 2026-04-05 · https://github\\.com/acme/Other/blob/${OTHER}/`));
+  const limited = await atlas(['scan', 'github.com/acme'], {
+    recording: { ...ACME, [dates]: { status: 403, body: { message: 'API rate limit exceeded for 192.0.2.1.' } } },
+    token: undefined,
+  });
+  assert.equal(limited.code, 1);
+  assert.equal(limited.stdout, '');
+  assert.equal(limited.stderr, 'GitHub rate limit reached; set GITHUB_TOKEN');
+});
+
 test('at most 8 repositories at the same time', async () => {
   const names = Array.from({ length: 30 }, (_, i) => `r${i}`);
   const many = replay({
@@ -316,7 +333,7 @@ test('an empty repository on its own → a clear message, exit code 1', async ()
 });
 
 test('the browser terminal scans an organization too', async () => {
-  const browser = createBrowserBackend({ fetch: replay(ACME) });
+  const browser = createBrowserBackend({ fetch: replay(ACME, noHistory()) });
   const output = await browser.run('$ skill-atlas scan https://github.com/acme');
   assert.ok(output.startsWith(`${ACME_OUTPUT}\n`), output);
   assert.match(output, /^warning: acme\/gone: Not found in acme\/gone: main; skipped$/m);

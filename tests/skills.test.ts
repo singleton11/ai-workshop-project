@@ -1,12 +1,13 @@
 // spec/analysis.md, "What is a skill" and "Duplicates": each case on a repository made for it, in a
 // temporary folder, so symbolic links and CRLF survive any checkout.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test, type TestContext } from 'node:test';
-import { atlas, EXAMPLE_COMMIT, FIXTURE, found, OWN_SKILLS } from './helpers.ts';
+import { atlas, EXAMPLE_COMMIT, FIXTURE, found, history, OWN_SKILLS } from './helpers.ts';
 
 const ROOT = join(FIXTURE, '..');
 
@@ -281,11 +282,13 @@ test('GitHub: SKILL.md and skill.md in one folder, and a symbolic link, follow t
     [`${RAW}/.claude/skills/commits/SKILL.md`]: { status: 200, body: COMMITS },
     [`${RAW}/.claude/skills/commits/skill.md`]: { status: 200, body: COMMITS },
     [`${RAW}/.agents/skills`]: { status: 200, body: '../.claude/skills' },
+    // The main path goes through the link, which has no history of its own: the date is its target's.
+    ...history('JetBrains/example', EXAMPLE_COMMIT, '.claude/skills/commits/SKILL.md', '2025-07-01T08:00:00Z'),
   };
   const expected = [
     'JetBrains/example · 1 skill',
     'commits — Write commits.',
-    `  https://github.com/JetBrains/example/blob/${EXAMPLE_COMMIT}/.agents/skills/commits/SKILL.md`,
+    `  updated 2025-07-01 · https://github.com/JetBrains/example/blob/${EXAMPLE_COMMIT}/.agents/skills/commits/SKILL.md`,
     '  also in .agents/skills/commits/skill.md, .claude/skills/commits/SKILL.md, .claude/skills/commits/skill.md',
   ].join('\n');
   // With a token through code search, without one through the tree: the same skills.
@@ -295,4 +298,47 @@ test('GitHub: SKILL.md and skill.md in one folder, and a symbolic link, follow t
     assert.equal(result.stderr, '');
     assert.equal(result.stdout, expected);
   }
+});
+
+test('a local folder: when each skill last changed, from Git if it is committed and unchanged, else the file time', async (t) => {
+  const root = repository(t, {
+    '.claude/skills/committed/SKILL.md': skill('Committed.', 'committed'),
+    '.claude/skills/edited/SKILL.md': skill('Edited.', 'edited'),
+  });
+  const git = (args: string[], date = '2024-02-03T04:05:06+02:00') =>
+    execFileSync('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', ...args], {
+      env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+    });
+  git(['init', '-q']);
+  git(['add', '.']);
+  git(['commit', '-q', '-m', 'Add the skills']);
+  // Changed since its commit, and one Git does not have: their modification times.
+  writeFileSync(join(root, '.claude/skills/edited/SKILL.md'), skill('Edited since.', 'edited'));
+  mkdirSync(join(root, '.claude/skills/new'));
+  writeFileSync(join(root, '.claude/skills/new/SKILL.md'), skill('New.', 'new'));
+  utimesSync(join(root, '.claude/skills/edited/SKILL.md'), new Date('2025-05-06T07:08:09Z'), new Date('2025-05-06T07:08:09Z'));
+  utimesSync(join(root, '.claude/skills/new/SKILL.md'), new Date('2025-12-31T23:59:59Z'), new Date('2025-12-31T23:59:59Z'));
+  const result = await atlas(['scan', root], { localDates: true });
+  assert.equal(result.code, 0, result.stderr);
+  const url = pathToFileURL(root).href;
+  assert.equal(
+    result.stdout,
+    [
+      'repo · 3 skills',
+      'committed — Committed.',
+      // Git's date, in UTC: 04:05 at +02:00 is 02:05 on the same day.
+      `  updated 2024-02-03 · ${url}/.claude/skills/committed/SKILL.md`,
+      'edited — Edited since.',
+      `  updated 2025-05-06 · ${url}/.claude/skills/edited/SKILL.md`,
+      'new — New.',
+      `  updated 2025-12-31 · ${url}/.claude/skills/new/SKILL.md`,
+    ].join('\n'),
+  );
+});
+
+test('a local folder that is not in Git: each file time', async (t) => {
+  const root = repository(t, { 'skills/plain/SKILL.md': skill('Plain.', 'plain') });
+  utimesSync(join(root, 'skills/plain/SKILL.md'), new Date('2023-09-10T11:12:13Z'), new Date('2023-09-10T11:12:13Z'));
+  const result = await atlas(['scan', root], { localDates: true });
+  assert.equal(result.stdout.split('\n')[2], `  updated 2023-09-10 · ${pathToFileURL(root).href}/skills/plain/SKILL.md`);
 });

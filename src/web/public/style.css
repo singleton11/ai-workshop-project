@@ -176,6 +176,7 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .card-title { font-weight: 650; font-size: 15px; }
 .card-text { color: var(--muted); font-size: 14px; flex: 1; }
 .card-path { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.card-date { font-size: 12px; color: var(--muted); }
 .card-loading { cursor: default; color: var(--muted); }
 .card-loading:hover { transform: none; border-color: var(--border); box-shadow: var(--shadow); }
 

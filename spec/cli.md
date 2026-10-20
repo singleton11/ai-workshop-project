@@ -16,9 +16,11 @@ A scan that stopped partway ([analysis](analysis.md#details)) prints the skills 
 ```
 JetBrains/kotlin · 6 skills
 build-tools-bump-gradle-api — Bumps the Gradle API…
-  https://github.com/JetBrains/kotlin/blob/<commit>/…
+  updated 2026-03-14 · https://github.com/JetBrains/kotlin/blob/<commit>/…
 ```
 - Sorted by **name**; the description's *first sentence*
+- `updated <YYYY-MM-DD> · ` before the link: the day the skill [last changed](analysis.md#details),
+  in UTC; left out when it is not known
 - With `--filter`: `JetBrains/kotlin · 2 of 6 skills`, then only those two
 - `also in <paths>` for identical copies and symbolic links, main path first; warnings go to *stderr*
 

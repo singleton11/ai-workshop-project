@@ -9,7 +9,7 @@ import { openGitHub } from '../src/core/github.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { DEFAULT_RULES, parseRules } from '../src/core/rules.ts';
 import { scan } from '../src/core/scan.ts';
-import { atlas } from './helpers.ts';
+import { atlas, history, noHistory } from './helpers.ts';
 
 const COMMIT = '4444444444444444444444444444444444444444';
 const API = 'https://api.github.com/repos/acme/flaky';
@@ -40,7 +40,7 @@ const PAGE_1 = {
 /** Every URL the scan asked for, answered from the recording. */
 function recorded(recording: Recording): { fetch: Fetch; asked: string[] } {
   const asked: string[] = [];
-  const answer = replay(recording);
+  const answer = replay(recording, noHistory());
   return { asked, fetch: (url, init) => (asked.push(url), answer(url, init)) };
 }
 
@@ -100,6 +100,43 @@ test('a SKILL.md that cannot be read: left out, not "not found"; the others are 
   assert.equal(filtered.code, 1);
   assert.equal(filtered.stdout.split('\n')[0], 'acme/flaky · 1 of 2 skills');
   assert.match(filtered.stderr, /\nscan incomplete: GitHub answered 500 for .*beta\/SKILL\.md$/);
+});
+
+test('a date that cannot be read: the skill is listed without it, then "scan incomplete"; a file\'s error comes first', async () => {
+  const dates = (path: string) => `${API}/commits?sha=${COMMIT}&path=${path}&per_page=1`;
+  const recording = {
+    ...OPEN,
+    [`${API}/git/trees/${COMMIT}?recursive=1`]: tree([
+      file('.claude/skills/alpha/SKILL.md'),
+      file('.claude/skills/beta/SKILL.md'),
+      file('.claude/skills/gamma/SKILL.md'),
+    ]),
+    [`${RAW}/.claude/skills/alpha/SKILL.md`]: skill('alpha', 'The first skill.'),
+    [`${RAW}/.claude/skills/beta/SKILL.md`]: skill('beta', 'The second skill.'),
+    [`${RAW}/.claude/skills/gamma/SKILL.md`]: skill('gamma', 'The third skill.'),
+    ...history('acme/flaky', COMMIT, '.claude/skills/alpha/SKILL.md', '2026-01-02T03:04:05Z'),
+    [dates('.claude/skills/beta/SKILL.md')]: LIMITED,
+    [dates('.claude/skills/gamma/SKILL.md')]: { status: 502, body: { message: 'Bad Gateway' } },
+  };
+  const result = await atlas(['scan', 'github.com/acme/flaky'], { recording, token: undefined });
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, [
+    'acme/flaky · 3 skills',
+    'alpha — The first skill.',
+    `  updated 2026-01-02 · https://github.com/acme/flaky/blob/${COMMIT}/.claude/skills/alpha/SKILL.md`,
+    'beta — The second skill.',
+    `  https://github.com/acme/flaky/blob/${COMMIT}/.claude/skills/beta/SKILL.md`,
+    'gamma — The third skill.',
+    `  https://github.com/acme/flaky/blob/${COMMIT}/.claude/skills/gamma/SKILL.md`,
+  ].join('\n'));
+  // The first date's error, in path order.
+  assert.equal(result.stderr, 'scan incomplete: GitHub rate limit reached; set GITHUB_TOKEN');
+
+  // A file that cannot be read is the error, before any date.
+  const unreadable = { ...recording, [`${RAW}/.claude/skills/gamma/SKILL.md`]: { status: 500, body: 'oops' } };
+  const scanned = await atlas(['scan', 'github.com/acme/flaky'], { recording: unreadable, token: undefined });
+  assert.equal(scanned.stdout.split('\n')[0], 'acme/flaky · 2 skills');
+  assert.equal(scanned.stderr, `scan incomplete: GitHub answered 500 for ${RAW}/.claude/skills/gamma/SKILL.md`);
 });
 
 test('a symbolic link that cannot be read: left out, without a warning; the first error in path order', async () => {

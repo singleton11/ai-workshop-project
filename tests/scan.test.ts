@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import { openGitHub } from '../src/core/github.ts';
 import { parseSkill } from '../src/core/parse.ts';
 import { replay } from '../src/core/replay.ts';
-import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE } from './helpers.ts';
+import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, history, withoutDates } from './helpers.ts';
 
 const fixture = await atlas(['scan', FIXTURE]);
 const example = await atlas(['scan', 'github.com/JetBrains/example']);
@@ -46,6 +46,24 @@ test('scan prints the repository, then each skill with its first sentence and pi
   );
 });
 
+test('scan prints when each skill last changed: the last commit that changed its SKILL.md, the day in UTC', async () => {
+  const recording = history('JetBrains/example', EXAMPLE_COMMIT, '.claude/skills/commits/SKILL.md', '2026-03-14T23:30:00Z');
+  const result = await atlas(['scan', 'github.com/JetBrains/example'], { recording });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.equal(
+    result.stdout,
+    [
+      'JetBrains/example · 1 skill',
+      'commits — Write commit messages the way this repository does.',
+      `  updated 2026-03-14 · https://github.com/JetBrains/example/blob/${EXAMPLE_COMMIT}/.claude/skills/commits/SKILL.md`,
+    ].join('\n'),
+  );
+  // --filter keeps it; no commit GitHub knows of, no date (the test above).
+  const filtered = await atlas(['scan', '--filter', 'commit', 'github.com/JetBrains/example'], { recording });
+  assert.equal(filtered.stdout.split('\n')[2], result.stdout.split('\n')[2]);
+});
+
 test('./fixture: every skill, sorted by name, linked to its file, with a warning for the malformed one', () => {
   const root = pathToFileURL(FIXTURE).href;
   assert.equal(fixture.code, 0);
@@ -71,7 +89,7 @@ test('the CLI prints the result at once and stores nothing but the rules file', 
   const env = { ...process.env, XDG_CONFIG_HOME: config, SKILL_ATLAS_RULES: '' };
   const scanned = spawnSync(process.execPath, [CLI, 'scan', FIXTURE], { cwd, env, encoding: 'utf8' });
   assert.equal(scanned.status, 0, scanned.stderr);
-  assert.equal(scanned.stdout, `${fixture.stdout}\n`);
+  assert.equal(withoutDates(scanned.stdout), `${fixture.stdout}\n`);
   assert.deepEqual(readdirSync(cwd), []);
   assert.deepEqual(readdirSync(join(config, 'skill-atlas')), ['rules.yaml']);
 });

@@ -11,7 +11,9 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
   (`https://github.com/<owner>`, [what is scanned](analysis.md#an-organization)), and press *Scan*.
   A local directory is not accepted here: the page is for links.
 - The repository's skills fill the **catalog**: a card per skill with its name, its description's
-  *first sentence*, its repository and its path. Sorted by name, then path, as in the CLI.
+  *first sentence*, its repository, its path and `Updated <YYYY-MM-DD>`: the day it
+  [last changed](analysis.md#details), in UTC, the whole time on hover; no date, no such line.
+  Sorted by name, then path, as in the CLI.
 - More URLs add more repositories; the catalog holds them all, grouped by repository, with the
   number of skills and the scanned commit. Scanning a repository again replaces its skills.
   Each repository can be removed.
@@ -22,8 +24,8 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
 - Skills are added **as each one is read**, not once the scan is done. A repository shows with its
   commit as soon as its files are listed, then each skill, sorted, as soon as it is certain: its
   `SKILL.md` and every path shorter than it (or as long, sorting before it) are read, so it is not
-  a copy of another one. Its id, name and main path don't change later. Its `also in` copies and the
-  repository's warnings come at the end.
+  a copy of another one, and its date is read. Its id, name, main path and date don't change later.
+  Its `also in` copies and the repository's warnings come at the end.
 - An organization shows **how far it has got** from the start. Before any repository is scanned,
   GitHub lists them 100 at a time, and code search (with `GITHUB_TOKEN`) finds their `SKILL.md` files
   100 at a time; on a large organization that takes a while. So, as soon as the owner is found, the
@@ -53,8 +55,8 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
 ## A skill
 
 Clicking a card opens it: the name, the whole description, the link to the `SKILL.md`
-at the scanned commit, the path, `also in` its copies, the other front matter keys, and the body
-rendered as Markdown. *Back* returns to the catalog.
+at the scanned commit, the path, *Updated* (the day it last changed, if known), `also in` its
+copies, the other front matter keys, and the body rendered as Markdown. *Back* returns to the catalog.
 
 The body comes from someone else's repository: raw HTML in it is shown as text, links other than
 `http(s):`, `mailto:` and relative ones are dropped, and the page allows no inline script.
@@ -72,19 +74,20 @@ each card opens its own. A bare `#<skill id>` opens its first copy in the catalo
 ## API
 
 `GET /api/scan?url=<GitHub URL>` →
-`200 { source, ref, repository, skills: [{ id, name, description, summary, path, link, commit, copies, properties, html }], warnings, error? }`;
+`200 { source, ref, repository, skills: [{ id, name, description, summary, path, link, commit, updated, copies, properties, html }], warnings, error? }`;
 `error` only when the scan stopped partway: the skills are those read before it.
 `source` is `https://github.com/<owner>/<repo>[/tree/<ref>]`, whatever way the URL was written: the
 same `source` is the same repository in the catalog. `summary` is the description's first sentence;
-`html`, the body, made safe as above.
+`html`, the body, made safe as above; `updated`, when it last changed, ISO 8601 in UTC, or `""`.
 An organization's URL → `200 { source, owner: { id, url }, listed, repositories: [<as above, each>], warnings }`,
 `source` being `https://github.com/<owner>`; `repositories`, those with skills; `warnings`, those
 of the organization and its other repositories, `<owner>/<repo>: <warning>`.
 With `Accept: application/x-ndjson` (the page asks so), the answer comes a line at a time, a JSON
 object on each.
 - A repository: `{ type: "opened", source, ref, repository }` once its files are listed;
-  `{ type: "skill", skill }` for each skill as soon as it is certain (as above, with `copies: []`),
-  shortest path first; then `{ type: "done", scan }`, `scan` the answer without the header.
+  `{ type: "skill", skill }` for each skill as soon as it is certain and its date is read (as above,
+  with `copies: []`), shortest path first: a skill waits for the dates of those before it; then
+  `{ type: "done", scan }`, `scan` the answer without the header.
 - An organization: `{ type: "listing", source, owner, repositories, search? }` while its
   repositories are listed: once the owner is found (`repositories: 0`), after each page of
   repositories (`repositories`: listed so far, forks and archived ones left out), then after each page
@@ -103,6 +106,7 @@ status and body are as without the header (an unknown owner is still a `422`). A
 first line is out once its owner is found, so a failure listing its repositories is a line too.
 A page that goes away before its answer is done (*Remove* on an entry being scanned, a closed tab)
 stops the scan on the server too: nothing more is asked of GitHub for it, the requests under way are
-cancelled, and no repository of an organization still waiting its turn is opened.
+cancelled, and no repository of an organization still waiting its turn is opened. Only that scan
+stops: the server goes on, and so do the other pages' scans, even when skills' dates are being read.
 A bad or missing URL, or a local path → `400 { error }`; any other failure the CLI explains
 (not found, rate limit, broken rules file) → `422 { error }`, with the CLI's message.

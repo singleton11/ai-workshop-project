@@ -1,7 +1,7 @@
 // The skill-atlas commands. The same code serves the Node CLI and the browser
 // terminal: everything that differs between them comes in through the context.
 import { AtlasError } from './core/errors.ts';
-import { skillLink, type Repository, type Skill } from './core/model.ts';
+import { skillLink, updatedDay, type Repository, type Skill } from './core/model.ts';
 import { scanOrganization, type Organization, type OrganizationResult } from './core/organization.ts';
 import { DEFAULT_RULES, parseRules } from './core/rules.ts';
 import { scan, type Source } from './core/scan.ts';
@@ -101,13 +101,17 @@ function matches(skill: Skill, text: string): boolean {
   return [skill.name, skill.description, skill.path].some((field) => field.toLowerCase().includes(text));
 }
 
-/** `<owner>/<repo> · N skills` (`N of M skills` when filtered), then each skill's name, first sentence and link. */
+/**
+ * `<owner>/<repo> · N skills` (`N of M skills` when filtered), then each skill's name and first
+ * sentence; when it last changed, if that is known, and its link.
+ */
 function printRepository(repository: Repository, skills: Skill[], total: number | undefined, { print }: Context) {
   const count = total === undefined ? `${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}` : `${skills.length} of ${total} skills`;
   print(`${repository.id} · ${count}`);
   for (const skill of skills) {
     print(skill.description ? `${skill.name} — ${firstSentence(skill.description)}` : skill.name);
-    print(`  ${skillLink(repository, skill)}`);
+    const day = updatedDay(skill);
+    print(`  ${day ? `updated ${day} · ` : ''}${skillLink(repository, skill)}`);
     if (skill.copies.length > 0) print(`  also in ${skill.copies.join(', ')}`);
   }
 }

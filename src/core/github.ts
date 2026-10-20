@@ -102,6 +102,13 @@ async function openRepository(
       const bytes = await github.raw(`${RAW}/${id}/${sha}/${encodePath(path)}`);
       return bytes && new TextDecoder().decode(bytes).trim();
     },
+    // The last commit that changed it, up to the scanned one: one request a skill.
+    updated: async (path) => {
+      const commits = await github.json<{ commit: { committer: { date: string } } }[]>(
+        `${API}/repos/${id}/commits?sha=${sha}&path=${encodePath(path)}&per_page=1`,
+      );
+      return commits[0]?.commit.committer.date;
+    },
   };
 }
 
