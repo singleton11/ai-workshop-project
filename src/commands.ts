@@ -112,7 +112,10 @@ function printRepository(repository: Repository, skills: Skill[], total: number 
   }
 }
 
-/** `<owner> · N skills in M of K repositories`, then each repository with skills, as for one. */
+/**
+ * `<owner> · N skills in M of K repositories`, then each repository with skills, as for one; then
+ * `scan incomplete: <owner>/<repo>: <message>` for each repository that stopped partway.
+ */
 function printOrganization(result: OrganizationResult, context: Context, filter = '') {
   const repositories = result.repositories
     .map((scanResult) => ({
@@ -128,6 +131,12 @@ function printOrganization(result: OrganizationResult, context: Context, filter 
   }
   for (const { repository, warnings } of result.repositories) for (const warning of warnings) context.error(`warning: ${repository.id}: ${warning}`);
   for (const warning of result.warnings) context.error(`warning: ${warning}`);
+  // A repository that stopped partway is printed with what it read, filtered out or not; the
+  // organization scan is still a failure, as for one repository.
+  const incomplete = result.repositories.filter(({ error }) => error !== undefined);
+  if (incomplete.length > 0) {
+    throw new AtlasError(incomplete.map(({ repository, error }) => `scan incomplete: ${repository.id}: ${error}`).join('\n'));
+  }
 }
 
 /** `N skills in M of K repositories`: the CLI's and the page's. */

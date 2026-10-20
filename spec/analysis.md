@@ -53,7 +53,8 @@ the organization, or the user, owns is scanned, each as on its own, with the sam
   `<owner>/<repo>: <message>; skipped`, and the scan goes on; an empty one (no commit) is skipped
   without one. The warnings of a repository without skills are kept, `<owner>/<repo>: <warning>`.
 - A repository scan that stops partway keeps its successfully read skills and warnings. If it has
-  skills, its partial error stays with it; with no skills, its error is an organization warning.
+  skills, its partial error stays with it (the CLI then fails: [cli](cli.md#output)); with no
+  skills, its error is an organization warning.
 - Rate limit, a rejected token or no network **stops** the scan: a clear message, exit code 1,
   nothing printed; every other repository would fail the same way.
 - An unknown owner → `Organization or user not found: https://github.com/<owner>`, exit code 1.

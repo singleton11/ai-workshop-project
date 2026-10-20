@@ -136,6 +136,38 @@ test('an organization filter applies to its repository skills without filtering 
   assert.match(result.stderr, /^warning: acme\/gone: Not found in acme\/gone: main; skipped/m);
 });
 
+test('a repository that stops partway: its skills read before it, then "scan incomplete", exit code 1; --filter too', async () => {
+  const deploy = `https://raw.githubusercontent.com/acme/tools/${TOOLS}/skills/deploy/SKILL.md`;
+  const recording = { ...ACME, [deploy]: { status: 500, body: 'Internal Server Error' } };
+  const incomplete = `scan incomplete: acme/tools: GitHub answered 500 for ${deploy}`;
+
+  const result = await atlas(['scan', 'https://github.com/acme'], { recording, token: undefined });
+  assert.equal(result.code, 1);
+  assert.equal(
+    result.stdout,
+    [
+      'acme · 2 skills in 2 of 5 repositories',
+      '',
+      'acme/Other · 1 skill',
+      'triage — Sort new issues.',
+      `  https://github.com/acme/Other/blob/${OTHER}/.claude/skills/triage/SKILL.md`,
+      '',
+      'acme/tools · 1 skill',
+      'review — Review pull requests.',
+      `  https://github.com/acme/tools/blob/${TOOLS}/.claude/skills/review/SKILL.md`,
+    ].join('\n'),
+  );
+  assert.match(result.stderr, /^warning: acme\/gone: Not found in acme\/gone: main; skipped$/m);
+  assert.ok(result.stderr.split('\n').at(-1)!.startsWith(incomplete), result.stderr);
+
+  // acme/tools has no skill that matches, and its scan is still incomplete.
+  const filtered = await atlas(['scan', '--filter', 'triage', 'https://github.com/acme'], { recording, token: undefined });
+  assert.equal(filtered.code, 1);
+  assert.equal(filtered.stdout.split('\n')[0], 'acme · 1 skill in 1 of 5 repositories');
+  assert.doesNotMatch(filtered.stdout, /acme\/tools/);
+  assert.ok(filtered.stderr.split('\n').at(-1)!.startsWith(incomplete), filtered.stderr);
+});
+
 test('an organization, with a token: one code search, and only the repositories it finds a SKILL.md in are opened', async () => {
   const asked: string[] = [];
   const github = replay({ ...ACME, ...ACME_SEARCH });

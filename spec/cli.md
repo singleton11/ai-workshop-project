@@ -23,7 +23,9 @@ build-tools-bump-gradle-api — Bumps the Gradle API…
 - `also in <paths>` for identical copies and symbolic links, main path first; warnings go to *stderr*
 
 An organization: a first line with the totals, then each repository with skills as above, after an
-empty line. Its warnings are `warning: <owner>/<repo>: <warning>`.
+empty line. Its warnings are `warning: <owner>/<repo>: <warning>`. A repository that stopped partway
+with skills is printed with them; after the warnings, `scan incomplete: <owner>/<repo>: <message>` on
+*stderr* for each such repository, `--filter` or not, and exit code 1.
 ```
 JetBrains · 8 skills in 2 of 412 repositories
 
