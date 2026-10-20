@@ -2,7 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { run, type RulesStore } from '../src/commands.ts';
-import { openGitHub, parseGitHubUrl } from '../src/core/github.ts';
+import { openGitHub, openGitHubOwner, parseGitHubOwnerUrl, parseGitHubUrl, type Fetch } from '../src/core/github.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { DEFAULT_RULES } from '../src/core/rules.ts';
 import { openDirectory } from '../src/local.ts';
@@ -47,6 +47,8 @@ export type AtlasOptions = {
   token?: string;
   /** The rules: the defaults, kept in memory, unless given. */
   rules?: RulesStore;
+  /** GitHub itself, instead of the recordings. */
+  fetch?: Fetch;
 };
 
 /** The default rules, in memory, so nothing is written; `--rules` still reads its file. */
@@ -58,13 +60,16 @@ export const DEFAULTS: RulesStore = {
 
 /** `skill-atlas <args>`, as the CLI runs it, with GitHub answering from EXAMPLE. */
 export async function atlas(args: string[], options: AtlasOptions = {}) {
-  const github = replay({ ...EXAMPLE, ...options.recording });
+  const github = options.fetch ?? replay({ ...EXAMPLE, ...options.recording });
   const token = 'token' in options ? options.token : 'test';
   const stdout: string[] = [];
   const stderr: string[] = [];
   const code = await run(args, {
     // With a token, through code search, as EXAMPLE answers it.
-    open: (input) => (parseGitHubUrl(input) ? openGitHub(input, { fetch: github, token }) : openDirectory(input)),
+    open: (input) =>
+      parseGitHubUrl(input) ? openGitHub(input, { fetch: github, token })
+      : parseGitHubOwnerUrl(input) ? openGitHubOwner(input, { fetch: github, token })
+      : openDirectory(input),
     print: (text) => stdout.push(text),
     error: (text) => stderr.push(text),
     rules: options.rules ?? DEFAULTS,

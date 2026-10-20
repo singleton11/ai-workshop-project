@@ -1,4 +1,4 @@
-import { compare, findSkills, type Candidate } from './find.ts';
+import { compare, findSkills } from './find.ts';
 import { sortSkills, type Repository, type Skill } from './model.ts';
 import { parseSkill } from './parse.ts';
 import type { Rules } from './rules.ts';
@@ -20,8 +20,12 @@ export type Source = {
 
 export type ScanResult = { repository: Repository; skills: Skill[]; warnings: string[] };
 
-/** fetch → find (rules) → parse. Nothing is stored: the result is all there is. */
-export async function scan(source: Source, rules: Rules): Promise<ScanResult> {
+/**
+ * fetch → find (rules) → parse. Nothing is stored: the result is all there is.
+ * `found` hears of each skill as soon as it is certain, before the scan is done: its id, name and
+ * main path are the result's, its copies those read so far. Not after the scan fails.
+ */
+export async function scan(source: Source, rules: Rules, found?: (skill: Skill) => void): Promise<ScanResult> {
   // Everything is read at the same time: on GitHub, each one is a request.
   const targets = new Map<string, string>();
   await Promise.all(
@@ -30,40 +34,60 @@ export async function scan(source: Source, rules: Rules): Promise<ScanResult> {
       if (target !== undefined) targets.set(link, target);
     }),
   );
-  const found = findSkills(source.paths, targets, rules);
-  const files = [...new Set(found.candidates.map((candidate) => candidate.file))];
+  const listed = findSkills(source.paths, targets, rules);
+  // Identical SKILL.md files are one skill, at the first of their paths in this order: a skill is
+  // certain once its path and every path before it are read.
+  const candidates = [...listed.candidates].sort((a, b) => byMainPath(a.path, b.path));
+  const files = [...new Set(candidates.map((candidate) => candidate.file))];
   const texts = new Map<string, string | undefined>();
-  await Promise.all(files.map(async (file) => texts.set(file, normalize(await source.read(file)))));
-
-  const warnings = [...source.warnings, ...found.warnings];
-  // Identical SKILL.md files are one skill.
-  const groups = new Map<string, Candidate[]>();
-  for (const candidate of found.candidates) {
-    const text = texts.get(candidate.file);
-    if (text === undefined) continue;
-    groups.set(text, [...(groups.get(text) ?? []), candidate]);
-  }
-  for (const file of files.sort(compare)) {
-    if (texts.get(file) === undefined) warnings.push(`${file}: listed, but not found at the scanned commit; skipped`);
-  }
-
+  const byText = new Map<string, Skill>();
   const skills: Skill[] = [];
   const parseWarnings: string[] = [];
-  for (const [text, candidates] of groups) {
-    const [main, ...copies] = candidates.map((candidate) => candidate.path).sort(byMainPath);
-    const parsed = parseSkill(text);
-    if (parsed.warning) parseWarnings.push(`${main}: ${parsed.warning}`);
-    skills.push({
-      id: `${source.repository.id}:${main}`,
-      repository: source.repository.id,
-      path: main,
-      name: parsed.name ?? main.split('/').at(-2) ?? source.repository.name,
-      description: parsed.description,
-      commit: source.repository.commit,
-      copies,
-      properties: parsed.properties,
-      body: parsed.body,
-    });
+  let next = 0;
+  let failed = false;
+  const advance = () => {
+    for (; !failed && next < candidates.length && texts.has(candidates[next].file); next++) {
+      const { path, file } = candidates[next];
+      const text = texts.get(file);
+      if (text === undefined) continue;
+      const known = byText.get(text);
+      if (known) {
+        known.copies.push(path);
+        continue;
+      }
+      const parsed = parseSkill(text);
+      if (parsed.warning) parseWarnings.push(`${path}: ${parsed.warning}`);
+      const skill: Skill = {
+        id: `${source.repository.id}:${path}`,
+        repository: source.repository.id,
+        path,
+        name: parsed.name ?? path.split('/').at(-2) ?? source.repository.name,
+        description: parsed.description,
+        commit: source.repository.commit,
+        copies: [],
+        properties: parsed.properties,
+        body: parsed.body,
+      };
+      byText.set(text, skill);
+      skills.push(skill);
+      found?.({ ...skill, copies: [] });
+    }
+  };
+  await Promise.all(
+    files.map(async (file) => {
+      try {
+        texts.set(file, normalize(await source.read(file)));
+      } catch (error) {
+        failed = true; // the rest is not heard of
+        throw error;
+      }
+      advance();
+    }),
+  );
+
+  const warnings = [...source.warnings, ...listed.warnings];
+  for (const file of files.sort(compare)) {
+    if (texts.get(file) === undefined) warnings.push(`${file}: listed, but not found at the scanned commit; skipped`);
   }
   warnings.push(...parseWarnings.sort(compare));
   if (rules.warnings.sameName) warnings.push(...sameNames(skills));
