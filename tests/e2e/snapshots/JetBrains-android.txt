@@ -1,0 +1,5 @@
+$ ./skill-atlas scan github.com/JetBrains/android/tree/0a40d23123eb4d6d7842dee26cdf5b0d8a96ea78
+--- stdout
+JetBrains/android · 0 skills
+--- stderr
+warning: the tree is too large to list at once; looked only in .agents/skills, .claude/skills, .github/skills, agent/skills

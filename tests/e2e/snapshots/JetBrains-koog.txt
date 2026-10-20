@@ -1,0 +1,13 @@
+$ ./skill-atlas scan github.com/JetBrains/koog/tree/22e342e033c716f835312dd6cbe83193e1cbcf76
+--- stdout
+JetBrains/koog · 4 skills
+add-java-code-snippets-in-docs — Use when the user asks to add Java tabs/examples to mkdocs docs that already have Kotlin examples (files under docs/docs/**.md using === "Kotlin" / Knit INCLUDE+SUFFIX blocks).
+  https://github.com/JetBrains/koog/blob/22e342e033c716f835312dd6cbe83193e1cbcf76/.claude/skills/add-java-code-snippets-in-docs/SKILL.md
+arithmetic-evaluator — Evaluate arithmetic expressions and return numeric results.
+  https://github.com/JetBrains/koog/blob/22e342e033c716f835312dd6cbe83193e1cbcf76/integration-tests/src/jvmTest/resources/skills/arithmetic-evaluator/SKILL.md
+split-jvm-nonjvm — Splits a class or several classes in the common source set commonMain into JVM and non-JVM parts into jvmCommonMain and nonJvmCommonMain.
+  https://github.com/JetBrains/koog/blob/22e342e033c716f835312dd6cbe83193e1cbcf76/.claude/skills/split-jvm-nonjvm/SKILL.md
+weather-retrieval — Retrieve current weather information for a specific location.
+  https://github.com/JetBrains/koog/blob/22e342e033c716f835312dd6cbe83193e1cbcf76/integration-tests/src/jvmTest/resources/skills/weather-retrieval/SKILL.md
+--- stderr
+

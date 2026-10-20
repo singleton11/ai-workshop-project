@@ -9,3 +9,4 @@ Integration tests for every case in the spec.
 ## Commands
 - `npm ci`: first, in a fresh checkout
 - `npm test`: the tests
+- `npm run test:e2e`: real repositories against snapshots; `npm run test:e2e:update` rewrites them
