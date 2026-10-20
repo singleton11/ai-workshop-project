@@ -3,9 +3,10 @@
 Each demo's key moments are screenshots. Argos compares them with the approved baseline and a
 human approves any difference side by side.
 
-- `partial-scan.spec.ts`: the web demo (Playwright). `shot()` is a key moment.
-- `cli.tape`: the CLI demo (VHS). `Screenshot` is a key moment.
+- `partial-scan.spec.ts`, `last-updated.spec.ts`: the web demos (Playwright). `shot()` is a key moment.
+- `cli.tape`, `last-updated.tape`: the CLI demos (VHS). `Screenshot` is a key moment.
 - `net.json`: GitHub's answers, replayed by `flaky.mjs`; no network. Recorded without a token.
+  Each skill's date is one more answer: `…/commits?sha=<commit>&path=<file>&per_page=1`.
   Record again: `env -u GITHUB_TOKEN RECORD=$PWD/tests/visual/net.json node --import ./.agents/skills/record-feature-video/scripts/flaky.mjs src/cli.ts scan <url>`.
 - `rules.yaml`: the rules, fixed. `Dockerfile`: the one machine (OS, Chromium, fonts, VHS).
 

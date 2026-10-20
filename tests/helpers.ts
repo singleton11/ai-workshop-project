@@ -51,6 +51,32 @@ export const EXAMPLE: Recording = {
   },
 };
 
+/** A request for the last commit that changed a file, as `openGitHub` asks it for a skill's date. */
+export const HISTORY = /^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/commits\?sha=/;
+
+/**
+ * Answers a history request that is not recorded with no commits: a skill without a date. Anything
+ * else goes to `next`, or fails as `replay` does.
+ */
+export function noHistory(next?: Fetch): Fetch {
+  return async (url, init) => {
+    if (HISTORY.test(url)) return new Response('[]', { status: 200 });
+    if (next) return next(url, init);
+    throw new Error(`not recorded: ${url}`);
+  };
+}
+
+/** GitHub's answer for the last commit that changed `path` at `commit` in `repo`: committed at `date`. */
+export function history(repo: string, commit: string, path: string, date: string): Recording {
+  const url = `https://api.github.com/repos/${repo}/commits?sha=${commit}&path=${path.split('/').map(encodeURIComponent).join('/')}&per_page=1`;
+  return { [url]: { status: 200, body: [{ sha: 'f'.repeat(40), commit: { committer: { name: 'Someone', date } } }] } };
+}
+
+/** CLI output with each `updated <day> · ` taken out: for scans of local folders, whose dates are the machine's. */
+export function withoutDates(text: string): string {
+  return text.replace(/^ {2}updated \d{4}-\d{2}-\d{2} · /gm, '  ');
+}
+
 export type AtlasOptions = {
   /** More recorded GitHub answers, next to EXAMPLE. */
   recording?: Recording;
@@ -62,6 +88,8 @@ export type AtlasOptions = {
   rules?: RulesStore;
   /** GitHub itself, instead of the recordings. */
   fetch?: Fetch;
+  /** A local folder's dates are the machine's (its Git history, its file times), so they are taken out unless kept. */
+  localDates?: boolean;
 };
 
 /** The default rules, in memory, so nothing is written; `--rules` still reads its file. */
@@ -73,19 +101,21 @@ export const DEFAULTS: RulesStore = {
 
 /** `skill-atlas <args>`, as the CLI runs it, with GitHub answering from EXAMPLE. */
 export async function atlas(args: string[], options: AtlasOptions = {}) {
-  const github = options.fetch ?? replay({ ...EXAMPLE, ...options.recording }, options.fallback);
+  const github = options.fetch ?? replay({ ...EXAMPLE, ...options.recording }, noHistory(options.fallback));
   const token = 'token' in options ? options.token : 'test';
   const stdout: string[] = [];
   const stderr: string[] = [];
+  let local = false;
   const code = await run(args, {
     // With a token, through code search, as EXAMPLE answers it.
     open: (input) =>
       parseGitHubUrl(input) ? openGitHub(input, { fetch: github, token })
       : parseGitHubOwnerUrl(input) ? openGitHubOwner(input, { fetch: github, token })
-      : openDirectory(input),
+      : ((local = true), openDirectory(input)),
     print: (text) => stdout.push(text),
     error: (text) => stderr.push(text),
     rules: options.rules ?? DEFAULTS,
   });
-  return { code, stdout: stdout.join('\n'), stderr: stderr.join('\n') };
+  const printed = stdout.join('\n');
+  return { code, stdout: local && !options.localDates ? withoutDates(printed) : printed, stderr: stderr.join('\n') };
 }

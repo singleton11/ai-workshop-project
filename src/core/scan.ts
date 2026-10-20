@@ -19,6 +19,8 @@ export type Source = {
   read(path: string): Promise<Uint8Array | undefined>;
   /** A symbolic link's target, as the link says it, or undefined if it is not there. */
   readLink(path: string): Promise<string | undefined>;
+  /** When the file last changed, ISO 8601 in UTC, or undefined if that is not known. */
+  updated(path: string): Promise<string | undefined>;
 };
 
 export type ScanResult = {
@@ -31,9 +33,10 @@ export type ScanResult = {
 
 /**
  * fetch → find (rules) → parse. Nothing is stored: the result is all there is.
- * `found` hears of each skill as soon as it is certain, before the scan is done: its id, name and
- * main path are the result's, its copies those read so far. A failure once the repository is open
- * does not lose what was read: it is the result's `error`.
+ * `found` hears of each skill as soon as it is certain and its date is read, before the scan is
+ * done, in main path order: its id, name, main path and date are the result's; its copies are not
+ * there yet. A failure once the repository is open does not lose what was read: it is the result's
+ * `error`.
  */
 export async function scan(source: Source, rules: Rules, found?: (skill: Skill) => void): Promise<ScanResult> {
   // Everything is read at the same time: on GitHub, each one is a request.
@@ -50,6 +53,9 @@ export async function scan(source: Source, rules: Rules, found?: (skill: Skill) 
   const byText = new Map<string, Skill>();
   const skills: Skill[] = [];
   const parseWarnings: string[] = [];
+  const dateErrors = new Map<string, string>();
+  // Each skill is heard of once its date is in, in the order the skills became certain.
+  let heard = Promise.resolve();
   let next = 0;
   const advance = () => {
     for (; next < candidates.length && texts.has(candidates[next].file); next++) {
@@ -71,13 +77,19 @@ export async function scan(source: Source, rules: Rules, found?: (skill: Skill) 
         name: parsed.name ?? path.split('/').at(-2) ?? source.repository.name,
         description: parsed.description,
         commit: source.repository.commit,
+        updated: '',
         copies: [],
         properties: parsed.properties,
         body: parsed.body,
       };
       byText.set(text, skill);
       skills.push(skill);
-      found?.({ ...skill, copies: [] });
+      // The file read, not the path: a path through a symbolic link has no history of its own.
+      const date = readDate(source, file, dateErrors);
+      heard = heard.then(async () => {
+        skill.updated = (await date) ?? '';
+        found?.({ ...skill, copies: [] });
+      });
     }
   };
   await Promise.all(
@@ -92,9 +104,13 @@ export async function scan(source: Source, rules: Rules, found?: (skill: Skill) 
       advance();
     }),
   );
+  await heard;
 
   const [firstFailedFile] = [...fileErrors.keys()].sort(compare);
-  const error = source.error ?? links.error ?? (firstFailedFile === undefined ? undefined : fileErrors.get(firstFailedFile));
+  const [firstFailedDate] = [...dateErrors.keys()].sort(compare);
+  const error = source.error ?? links.error ??
+    (firstFailedFile === undefined ? undefined : fileErrors.get(firstFailedFile)) ??
+    (firstFailedDate === undefined ? undefined : dateErrors.get(firstFailedDate));
   const warnings = [...source.warnings, ...listed.warnings];
   for (const file of files.sort(compare)) {
     if (texts.has(file) && texts.get(file) === undefined && !fileErrors.has(file)) {
@@ -125,6 +141,17 @@ async function readAll<T>(paths: string[], read: (path: string) => Promise<T>): 
   );
   const [first] = [...failures.keys()].sort(compare);
   return { read: results, error: first === undefined ? undefined : failures.get(first) };
+}
+
+/** When the file last changed; a failure leaves it unknown and goes into `errors`. */
+async function readDate(source: Source, file: string, errors: Map<string, string>): Promise<string | undefined> {
+  try {
+    return await source.updated(file);
+  } catch (error) {
+    if (!(error instanceof AtlasError)) throw error;
+    errors.set(file, error.message);
+    return undefined;
+  }
 }
 
 /** Without a UTF-8 BOM, and with LF line endings: what makes two copies identical. */

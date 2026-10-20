@@ -8,7 +8,7 @@
 // spec/web.md.
 
 /** @typedef {{ id: string, name: string, description: string, summary: string, path: string, link: string,
- *   commit: string, copies: string[], properties: Record<string, unknown>, html: string }} Skill */
+ *   commit: string, updated: string, copies: string[], properties: Record<string, unknown>, html: string }} Skill */
 /** @typedef {{ source: string, ref: string, repository: { id: string, url: string, commit: string },
  *   skills: Skill[], warnings: string[], error?: string, reading?: boolean }} Scan */
 /** @typedef {{ source: string, owner: { id: string, url: string }, listed: number, repositories: Scan[],
@@ -383,7 +383,13 @@ function renderCard(skill, origin) {
     } },
     h('span', { class: 'card-title' }, skill.name),
     h('span', { class: 'card-text' }, skill.summary || 'No description.'),
-    h('span', { class: 'card-path' }, skill.path));
+    h('span', { class: 'card-path' }, skill.path),
+    skill.updated && h('span', { class: 'card-date' }, 'Updated ', updated(skill)));
+}
+
+/** When the skill last changed: the day, in UTC, as the CLI says it; the whole time on hover. @param {Skill} skill */
+function updated(skill) {
+  return h('time', { datetime: skill.updated, title: skill.updated }, skill.updated.slice(0, 10));
 }
 
 function renderSkill(open) {
@@ -420,6 +426,7 @@ function renderSkill(open) {
           h('dt', {}, 'Repository'), h('dd', {}, h('a', { href: scan.source, target: '_blank', rel: 'noopener noreferrer' }, scan.repository.id)),
           h('dt', {}, 'Path'), h('dd', {}, h('code', {}, skill.path)),
           h('dt', {}, 'Commit'), h('dd', {}, h('code', { title: skill.commit }, skill.commit.slice(0, 12))),
+          skill.updated && [h('dt', {}, 'Updated'), h('dd', { 'data-updated': '' }, updated(skill))],
           h('dt', {}, 'SKILL.md'), h('dd', {}, h('a', { href: skill.link, target: '_blank', rel: 'noopener noreferrer', 'data-link': '' }, 'Open on GitHub ↗')),
           skill.copies.length > 0 && [h('dt', {}, 'Also in'), h('dd', {}, h('ul', {}, skill.copies.map((copy) => h('li', {}, h('code', {}, copy)))))],
           properties.map(([key, value]) => [h('dt', {}, key), h('dd', {}, formatValue(value))])))));

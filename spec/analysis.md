@@ -7,13 +7,13 @@ too: [below](#an-organization)), or a local directory
 
 ## Output
 
-Every `SKILL.md`: **name**, **description**, **link**
+Every `SKILL.md`: **name**, **description**, **link**, **last updated**
 
 ## Architecture
 
 Core: fetch → find ([rules](rules.md)) → parse. The rules are an input to the core; the core never
 reads or writes the rules file. CLI: a *thin client*; it loads the rules, or creates them.
-Skill: id = `repo:path`, name, description, commit, the other front matter keys, the body.
+Skill: id = `repo:path`, name, description, commit, last updated, the other front matter keys, the body.
 Web: a thin client too, [web.md](web.md).
 
 ## Details
@@ -21,6 +21,13 @@ Web: a thin client too, [web.md](web.md).
 - **GitHub API**, no clone; *under 5 s* for intellij-community
 - The name: front matter, else the directory
 - The link pins the *scanned commit*
+- **Last updated**: when the skill's `SKILL.md` last changed, ISO 8601 in UTC. On GitHub, the
+  committer date of the last commit that changed the main path's file, up to the scanned commit
+  (`GET /repos/<owner>/<repo>/commits?sha=<commit>&path=<file>&per_page=1`): one more API request
+  per skill, not per copy. A main path through a symbolic link is dated by the file it leads to,
+  since the link's path has no history of its own. In a local directory, the last commit that
+  changed the file if Git has it and it has not changed since, else the file's modification time.
+  No commit found → no date (empty).
 - Malformed front matter → a *warning*, the scan goes on; so is one that refers to itself
   (`a: &m { self: *m }`)
 - Unreachable repository → a clear message, exit code 1
@@ -29,9 +36,10 @@ Web: a thin client too, [web.md](web.md).
   error) while listing or reading the files ends the scan with that *error*, but the skills read
   before it are kept, with their warnings. Code search
   keeps the pages before the one that failed; a tree folder that fails adds nothing, the others do;
-  a `SKILL.md` or link that cannot be read is left out, not warned about as missing. After a failed
+  a `SKILL.md` or link that cannot be read is left out, not warned about as missing; a skill whose
+  date cannot be read is kept, without a date. After a failed
   code search, no symbolic links are looked for: they could point at a file it did not reach.
-  The error is the first one: the listing's, else a link's, else a file's, in path order.
+  The error is the first one: the listing's, else a link's, else a file's, else a date's, in path order.
   Before the commit is known there is nothing to keep: the error is all there is.
 
 ## An organization

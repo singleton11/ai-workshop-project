@@ -20,6 +20,12 @@ export type Skill = {
   description: string;
   /** The scanned commit, the one the link pins; empty for a local directory. */
   commit: string;
+  /**
+   * When its SKILL.md last changed, ISO 8601 in UTC: on GitHub, the last commit that changed it, up
+   * to the scanned commit; in a local directory, the same in Git, else the file's modification time.
+   * Empty if it is not known.
+   */
+  updated: string;
   /** The same skill in other agents' folders. */
   copies: string[];
   /** The other front matter keys. */
@@ -41,4 +47,9 @@ export function skillLink(repository: Repository, skill: Skill): string {
 export function sortSkills(skills: Skill[]): Skill[] {
   const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   return [...skills].sort((a, b) => compare(a.name, b.name) || compare(a.path, b.path));
+}
+
+/** `2026-03-14`: the day a skill last changed, in UTC; empty if it is not known. */
+export function updatedDay(skill: Skill): string {
+  return skill.updated.slice(0, 10);
 }

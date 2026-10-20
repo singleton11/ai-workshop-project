@@ -10,7 +10,7 @@ import { createBrowserBackend } from '../src/browser.ts';
 import { openGitHub, openGitHubOwner, type Fetch } from '../src/core/github.ts';
 import { replay, type Recorded, type Recording } from '../src/core/replay.ts';
 import { createWebServer, listen } from '../src/web/server.ts';
-import { atlas, CLI, DEFAULTS, FIXTURE } from './helpers.ts';
+import { atlas, CLI, DEFAULTS, FIXTURE, history, HISTORY, noHistory } from './helpers.ts';
 
 const COMMIT = '1111111111111111111111111111111111111111';
 const TAGGED = '2222222222222222222222222222222222222222';
@@ -58,6 +58,9 @@ const RECORDING: Recording = {
   ...raw('acme/tools', COMMIT, '.github/skills/review/SKILL.md', REVIEW),
   ...raw('acme/tools', COMMIT, '.claude/skills/broken/SKILL.md', '---\nname: [broken\n---\nBody.\n'),
   ...raw('acme/tools', COMMIT, 'skills/deploy/SKILL.md', '---\nname: deploy\ndescription: Ship to production. Carefully.\n---\n'),
+  // When review and deploy last changed; broken has no commit that GitHub knows of.
+  ...history('acme/tools', COMMIT, '.claude/skills/review/SKILL.md', '2026-03-14T09:30:00Z'),
+  ...history('acme/tools', COMMIT, 'skills/deploy/SKILL.md', '2025-11-02T23:59:59Z'),
   'https://api.github.com/repos/acme/tools/commits/v1': { status: 200, body: { sha: TAGGED } },
   [`https://api.github.com/repos/acme/tools/git/trees/${TAGGED}?recursive=1`]: tree(['skills/deploy/SKILL.md']),
   ...raw('acme/tools', TAGGED, 'skills/deploy/SKILL.md', '---\nname: deploy\ndescription: The old deploy.\n---\n'),
@@ -91,8 +94,8 @@ const RECORDING: Recording = {
 
 let base = '';
 const server = createWebServer({
-  open: (url) => openGitHub(url, { fetch: replay(RECORDING) }),
-  openOwner: (url, _signal, listing) => openGitHubOwner(url, { fetch: replay(RECORDING) }, listing),
+  open: (url) => openGitHub(url, { fetch: replay(RECORDING, noHistory()) }),
+  openOwner: (url, _signal, listing) => openGitHubOwner(url, { fetch: replay(RECORDING, noHistory()) }, listing),
   rules: DEFAULTS,
   note: () => {},
 });
@@ -144,6 +147,59 @@ test('GET /api/scan: the skills, sorted, each with its link, summary, copies, pr
   assert.deepEqual(review.properties, { 'allowed-tools': 'Read, Grep', metadata: { owner: 'platform' } });
   assert.match(review.html, /<h1>Review<\/h1>/);
   assert.deepEqual(body.warnings, ['.claude/skills/broken/SKILL.md: malformed front matter: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 14; using the directory name']);
+});
+
+test('GET /api/scan: each skill with when its SKILL.md last changed, up to the scanned commit; empty if not known', async (t) => {
+  const { body } = await api('https://github.com/acme/tools');
+  assert.deepEqual(body.skills.map(({ name, updated }: { name: string; updated: string }) => [name, updated]), [
+    ['broken', ''],
+    ['deploy', '2025-11-02T23:59:59Z'],
+    ['review', '2026-03-14T09:30:00Z'],
+  ]);
+  // One request a skill, at the scanned commit, for its main path; none for a copy.
+  const server = await holding([]);
+  t.after(server.close);
+  await lines(server.address, 'https://github.com/acme/tools');
+  assert.deepEqual(server.fetched.filter((url) => HISTORY.test(url)).sort(), [
+    `https://api.github.com/repos/acme/tools/commits?sha=${COMMIT}&path=.claude/skills/broken/SKILL.md&per_page=1`,
+    `https://api.github.com/repos/acme/tools/commits?sha=${COMMIT}&path=.claude/skills/review/SKILL.md&per_page=1`,
+    `https://api.github.com/repos/acme/tools/commits?sha=${COMMIT}&path=skills/deploy/SKILL.md&per_page=1`,
+  ]);
+  // At a tag, its own commit.
+  const { body: tagged } = await api('https://github.com/acme/tools/tree/v1');
+  assert.deepEqual(tagged.skills.map((skill: { updated: string }) => skill.updated), ['']);
+});
+
+test('a repository, a line at a time: a skill comes with its date, so the line waits for it; still shortest path first', async (t) => {
+  // deploy's path is the shortest: broken and review, certain before its date is in, wait for it.
+  const deploy = `https://api.github.com/repos/acme/tools/commits?sha=${COMMIT}&path=skills/deploy/SKILL.md&per_page=1`;
+  const server = await holding([deploy]);
+  t.after(server.close);
+  const response = await fetch(`${server.address}api/scan?url=${encodeURIComponent('https://github.com/acme/tools')}`, { headers: { Accept: 'application/x-ndjson' } });
+  const arrived: { message: { type: string; skill?: { name: string; updated: string } }; at: number }[] = [];
+  const done = (async () => {
+    const decoder = new TextDecoder();
+    let text = '';
+    for await (const chunk of response.body!) {
+      text += decoder.decode(chunk, { stream: true });
+      const lines = text.split('\n');
+      text = lines.pop() ?? '';
+      for (const line of lines.filter((line) => line.trim())) arrived.push({ message: JSON.parse(line), at: performance.now() });
+    }
+  })();
+  await until(() => server.fetched.filter((url) => HISTORY.test(url)).length === 3);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const released = performance.now();
+  server.release(deploy);
+  await done;
+  const skills = arrived.filter(({ message }) => message.type === 'skill');
+  assert.ok(skills.every(({ at }) => at >= released), 'a skill line came before the date it waits for');
+  assert.deepEqual(skills.map(({ message }) => [message.skill!.name, message.skill!.updated]), [
+    ['deploy', '2025-11-02T23:59:59Z'],
+    ['broken', ''],
+    ['review', '2026-03-14T09:30:00Z'],
+  ]);
+  assert.equal(arrived.at(-1)?.message.type, 'done');
 });
 
 test('the body is made safe: raw HTML is text, unsafe links are dropped, relative and root-relative ones go to GitHub', async () => {
@@ -216,7 +272,7 @@ async function holding(held: string[], answers: Recording = {}, { token }: { tok
       new Promise((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason), { once: true })),
     ]);
     signal?.throwIfAborted();
-    return replay({ ...RECORDING, ...answers })(url, init);
+    return replay({ ...RECORDING, ...answers }, noHistory())(url, init);
   };
   const server = createWebServer({
     open: (url, signal) => openGitHub(url, { fetch: github, token, signal }),
@@ -452,8 +508,8 @@ test('a page that goes away stops its scan: nothing more is fetched, and no queu
 test('a broken rules file → 422 and nothing is fetched', async (t) => {
   const fetched: string[] = [];
   const broken = createWebServer({
-    open: (url) => openGitHub(url, { fetch: (url) => (fetched.push(url), replay(RECORDING)(url)) }),
-    openOwner: (url) => openGitHubOwner(url, { fetch: (url) => (fetched.push(url), replay(RECORDING)(url)) }),
+    open: (url) => openGitHub(url, { fetch: (url) => (fetched.push(url), replay(RECORDING, noHistory())(url)) }),
+    openOwner: (url) => openGitHubOwner(url, { fetch: (url) => (fetched.push(url), replay(RECORDING, noHistory())(url)) }),
     rules: { load: async () => ({ path: '/rules.yaml', text: 'version: 2\n' }), peek: async () => ({}) },
     note: () => {},
   });
@@ -568,6 +624,10 @@ test('the page: a pasted URL fills the catalog with a card per skill, sorted, an
   assert.deepEqual(p.texts('.card-title'), ['broken', 'deploy', 'review']);
   assert.deepEqual(p.texts('.card-text'), ['No description.', 'Ship to production.', 'Review pull requests the way this team does.']);
   assert.deepEqual(p.texts('.card-path'), ['.claude/skills/broken/SKILL.md', 'skills/deploy/SKILL.md', '.claude/skills/review/SKILL.md']);
+  // When each last changed, the day in UTC; broken has no date, so no line for it.
+  assert.deepEqual(p.texts('.card-date'), ['Updated 2025-11-02', 'Updated 2026-03-14']);
+  assert.equal(p.$('[data-skill="acme/tools:.claude/skills/broken/SKILL.md"] .card-date'), null);
+  assert.deepEqual(p.all('.card-date time').map((time) => time.getAttribute('datetime')), ['2025-11-02T23:59:59Z', '2026-03-14T09:30:00Z']);
   assert.equal(p.text('#count'), '3 skills');
   assert.deepEqual(p.params(), ['https://github.com/acme/tools']);
   assert.equal((p.$('#scan-url') as HTMLInputElement).value, '');
@@ -646,8 +706,8 @@ test('the page: a repository already in the catalog keeps its skills when a new 
   let failing = false;
   const failed: Recording = { ...RECORDING, [`https://raw.githubusercontent.com/acme/tools/${COMMIT}/skills/deploy/SKILL.md`]: { status: 500, body: 'oops' } };
   const flaky = createWebServer({
-    open: (url) => openGitHub(url, { fetch: replay(failing ? failed : RECORDING) }),
-    openOwner: (url) => openGitHubOwner(url, { fetch: replay(RECORDING) }),
+    open: (url) => openGitHub(url, { fetch: replay(failing ? failed : RECORDING, noHistory()) }),
+    openOwner: (url) => openGitHubOwner(url, { fetch: replay(RECORDING, noHistory()) }),
     rules: DEFAULTS,
     note: () => {},
   });
@@ -684,6 +744,8 @@ test('the page: a card opens its skill, with everything the SKILL.md says; Back 
   assert.equal(meta.Repository, 'acme/tools');
   assert.equal(meta.Path, '.claude/skills/review/SKILL.md');
   assert.equal(meta['Also in'], '.github/skills/review/SKILL.md');
+  assert.equal(meta.Updated, '2026-03-14');
+  assert.equal(p.$('#skill-view [data-updated] time')?.getAttribute('title'), '2026-03-14T09:30:00Z');
   assert.equal(meta['allowed-tools'], 'Read, Grep');
   assert.deepEqual(JSON.parse(meta.metadata ?? ''), { owner: 'platform' });
   assert.equal(p.text('.prose h1'), 'Review');
