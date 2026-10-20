@@ -1,6 +1,7 @@
 // The catalog page: paste a GitHub URL, of a repository or of an organization, the skills fill the
 // catalog; a card opens its skill.
-// An organization's repositories arrive one by one, as the server scans them.
+// A repository's skills arrive one by one, as the server reads them; an organization's repositories
+// too, each with its skills. The page is all there while a scan goes on: more scans, the filter, a skill.
 // Nothing is stored: the scanned URLs live in the address, `?repo=<url>`, the open skill in
 // `#in=<entry's source>&skill=<id>`: the same skill can be in two entries, at two commits.
 // spec/web.md.
@@ -8,10 +9,10 @@
 /** @typedef {{ id: string, name: string, description: string, summary: string, path: string, link: string,
  *   commit: string, copies: string[], properties: Record<string, unknown>, html: string }} Skill */
 /** @typedef {{ source: string, ref: string, repository: { id: string, url: string, commit: string },
- *   skills: Skill[], warnings: string[] }} Scan */
+ *   skills: Skill[], warnings: string[], reading?: boolean }} Scan */
 /** @typedef {{ source: string, owner: { id: string, url: string }, listed: number, repositories: Scan[],
  *   warnings: string[], scanning?: number, scanned?: number }} OrganizationScan */
-/** @typedef {{ key: string, scan?: Scan | OrganizationScan, loading: boolean }} Entry */
+/** @typedef {{ key: string, scan?: Scan | OrganizationScan, loading: boolean, controller?: AbortController }} Entry */
 
 const $ = (id) => document.getElementById(id);
 
@@ -23,6 +24,10 @@ let catalogScroll = 0;
 let openedFromCatalog = false;
 /** The skill the skill view shows, if it found it. */
 let shownSkill;
+/** Where the skill view shows it, so showing it again leaves it scrolled where it was. */
+let shownAt;
+/** The warnings the user opened, which stay open as scans redraw the catalog. */
+const openWarnings = new Set();
 
 /** An element, its attributes and children; text is always text. */
 function h(tag, attributes = {}, ...children) {
@@ -43,11 +48,16 @@ async function scan(input) {
   if (!input) return;
   showError('');
   const existing = entries.find((entry) => entry.key === input || entry.scan?.source === input);
+  if (existing?.loading) {
+    // Already being scanned.
+    $('scan-url').value = '';
+    return;
+  }
   const entry = existing ?? { key: input, loading: true };
-  entry.loading = true;
+  const controller = new AbortController();
+  Object.assign(entry, { loading: true, controller });
   if (!existing) entries.push(entry);
   render();
-  setBusy(true);
   // Where the scan goes, and what was there before it, to put back if it fails.
   let target = entry;
   let previous = entry.scan;
@@ -61,43 +71,53 @@ async function scan(input) {
       entries = entries.filter((other) => other !== entry);
       target = same;
       previous = same.scan;
-      same.loading = true;
+      same.controller?.abort();
+      Object.assign(same, { loading: true, controller });
     }
     Object.assign(target, { key: result.source, scan: result });
     saveAddress();
   };
   try {
-    const response = await fetch(`/api/scan?url=${encodeURIComponent(input)}`, { headers: { Accept: 'application/x-ndjson, application/json' } });
+    const response = await fetch(`/api/scan?url=${encodeURIComponent(input)}`, {
+      headers: { Accept: 'application/x-ndjson, application/json' },
+      signal: controller.signal,
+    });
     if ((response.headers.get('Content-Type') ?? '').startsWith('application/x-ndjson')) {
-      await readOrganization(response, show);
+      await readLines(response, show);
     } else {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? `The server answered ${response.status}`);
       show(body);
     }
     target.loading = false;
-    if (!existing) $('scan-url').value = '';
+    // Unless another URL is being typed in already.
+    if (!existing && $('scan-url').value.trim() === input) $('scan-url').value = '';
   } catch (error) {
+    // Removed while it was scanned: nothing to put back, nothing to say.
+    if (controller.signal.aborted) return;
     showError(error instanceof Error ? error.message : String(error));
     // The catalog is left as it was.
     if (previous) Object.assign(target, { key: previous.source, scan: previous, loading: false });
     else entries = entries.filter((other) => other !== target);
   } finally {
-    setBusy(entries.some((other) => other.loading));
-    saveAddress();
-    render();
+    if (target.controller === controller) delete target.controller;
+    if (!controller.signal.aborted) {
+      saveAddress();
+      render();
+    }
   }
 }
 
 /**
- * An organization, a line at a time: each repository is shown as soon as the server has scanned it,
- * in the order the organization lists them. A failure on the way fails the whole scan.
- * @param {Response} response @param {(scan: OrganizationScan) => void} show
+ * A scan, a line at a time: a repository's skills as the server reads them; an organization's
+ * repositories, each as its skills are read, in the order the organization lists them. A failure on
+ * the way fails the whole scan.
+ * @param {Response} response @param {(scan: Scan | OrganizationScan) => void} show
  */
-async function readOrganization(response, show) {
-  /** @type {OrganizationScan | undefined} */
+async function readLines(response, show) {
+  /** @type {Scan | OrganizationScan | undefined} */
   let scan;
-  const scanned = []; // by the repository's place in the list; holes for those without skills
+  const scanned = []; // an organization's, by the repository's place in the list; holes for those without skills
   let done = false;
   const take = (line) => {
     const message = JSON.parse(line);
@@ -105,12 +125,27 @@ async function readOrganization(response, show) {
     if (message.type === 'organization') {
       const { source, owner, listed, scanning } = message;
       scan = { source, owner, listed, repositories: [], warnings: [], scanning, scanned: 0 };
-    } else if (scan && message.type === 'repository') {
-      scan.scanned++;
-      if (message.repository) scanned[message.index] = message.repository;
+    } else if (message.type === 'opened') {
+      const { source, ref, repository } = message;
+      scan = { source, ref, repository, skills: [], warnings: [] };
+    } else if (!scan) {
+      return;
+    } else if ('repositories' in scan && message.type === 'skill') {
+      const { index, source, ref, repository, skill } = message;
+      const reading = scanned[index] ?? { source, ref, repository, skills: [], warnings: [], reading: true };
+      scanned[index] = { ...reading, skills: sortSkills([...reading.skills, skill]) };
       scan.repositories = scanned.filter(Boolean);
-    } else if (scan && message.type === 'done') {
+    } else if ('repositories' in scan && message.type === 'repository') {
+      scan.scanned++;
+      scanned[message.index] = message.repository;
+      scan.repositories = scanned.filter(Boolean);
+    } else if ('repositories' in scan && message.type === 'done') {
       scan.warnings = message.warnings;
+      done = true;
+    } else if (message.type === 'skill') {
+      scan = { ...scan, skills: sortSkills([...scan.skills, message.skill]) };
+    } else if (message.type === 'done') {
+      scan = message.scan;
       done = true;
     } else return;
     show(scan);
@@ -136,6 +171,12 @@ async function readOrganization(response, show) {
   if (!done) throw new Error('The scan stopped before it was done; try again');
 }
 
+/** By name, then path, in code-unit order: as the server sorts them. @param {Skill[]} skills */
+function sortSkills(skills) {
+  const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  return skills.sort((a, b) => compare(a.name, b.name) || compare(a.path, b.path));
+}
+
 /** A scan got further: the catalog shows it, but a skill already open is left alone, where it was scrolled to. */
 function progress() {
   if (openSkill() && shownSkill) return;
@@ -143,15 +184,10 @@ function progress() {
 }
 
 function remove(entry) {
+  entry.controller?.abort(); // its scan, if it is still going on
   entries = entries.filter((other) => other !== entry);
   saveAddress();
   render();
-}
-
-function setBusy(busy) {
-  const button = $('scan-button');
-  button.disabled = busy;
-  button.replaceChildren(...(busy ? [h('span', { class: 'spinner', 'aria-hidden': 'true' }), 'Scanning…'] : ['Scan']));
 }
 
 function showError(message) {
@@ -207,7 +243,7 @@ function render() {
   $('skill-view').hidden = !open;
   if (open) renderSkill(open);
   else {
-    shownSkill = undefined;
+    shownSkill = shownAt = undefined;
     renderCatalog();
   }
 }
@@ -224,7 +260,10 @@ function renderCatalog() {
   $('empty').hidden = entries.length > 0;
   $('toolbar').hidden = total === 0;
   $('count').textContent = filter ? `${shown} of ${total} skills` : `${total} ${total === 1 ? 'skill' : 'skills'}`;
+  // Drawn again as scans go on: what had the keyboard's focus keeps it.
+  const focused = document.activeElement?.closest?.('[data-focus]')?.getAttribute('data-focus');
   $('repositories').replaceChildren(...entries.map(renderEntry));
+  if (focused) [...document.querySelectorAll('[data-focus]')].find((element) => element.getAttribute('data-focus') === focused)?.focus({ preventScroll: true });
 }
 
 /** @param {Entry} entry */
@@ -251,7 +290,7 @@ function renderOrganization(entry, scan) {
         `scanned ${scan.scanned} of ${scan.scanning}`),
       entry.loading && h('span', { class: 'spinner', 'aria-label': 'Scanning' }),
       removeButton(entry, scan.owner.id)),
-    renderWarnings(scan.warnings),
+    renderWarnings(scan.warnings, scan.source),
     scan.repositories.length > 0
       ? scan.repositories.map((repository) => renderRepository(repository, scan.source))
       : h('p', { class: 'muted' }, entry.loading ? 'Scanning its repositories…' : 'No skills in its repositories.'));
@@ -270,34 +309,38 @@ function organizationSummary(skills, withSkills, listed) {
 function renderRepository(scan, origin, entry) {
   const skills = scan.skills.filter(matches);
   const label = scan.skills.length === 1 ? '1 skill' : `${scan.skills.length} skills`;
-  return h('section', { class: 'repository', 'data-repository': scan.repository.id, 'aria-busy': entry?.loading ? 'true' : undefined },
+  const reading = Boolean(entry?.loading || scan.reading);
+  return h('section', { class: 'repository', 'data-repository': scan.repository.id, 'aria-busy': reading ? 'true' : undefined },
     h('div', { class: 'repository-head' },
       h('h2', { class: 'repository-name' },
         h('a', { href: scan.source, target: '_blank', rel: 'noopener noreferrer' }, scan.repository.id)),
       h('span', { class: 'badge' }, label),
       scan.ref && h('span', { class: 'badge badge-muted', title: 'ref' }, scan.ref),
       h('span', { class: 'badge badge-muted', title: scan.repository.commit }, scan.repository.commit.slice(0, 7)),
-      entry?.loading && h('span', { class: 'spinner', 'aria-label': 'Scanning' }),
+      reading && h('span', { class: 'spinner', 'aria-label': 'Scanning' }),
       entry && removeButton(entry, scan.repository.id)),
-    renderWarnings(scan.warnings),
+    renderWarnings(scan.warnings, `${origin} ${scan.source}`),
     skills.length > 0
       ? h('div', { class: 'grid' }, skills.map((skill) => renderCard(skill, origin)))
-      : h('p', { class: 'muted' }, scan.skills.length ? 'No skill matches the filter.' : 'No skills in this repository.'));
+      : h('p', { class: 'muted' }, scan.skills.length ? 'No skill matches the filter.' : reading ? 'Reading its skills…' : 'No skills in this repository.'));
 }
 
 function removeButton(entry, name) {
-  return h('button', { class: 'button button-ghost', type: 'button', onclick: () => remove(entry), title: `Remove ${name}` }, 'Remove');
+  return h('button', { class: 'button button-ghost', type: 'button', onclick: () => remove(entry), title: `Remove ${name}`, 'data-focus': `remove ${entry.key}` }, 'Remove');
 }
 
-function renderWarnings(warnings) {
-  return warnings.length > 0 && h('details', { class: 'alert alert-warn' },
-    h('summary', {}, warnings.length === 1 ? '1 warning' : `${warnings.length} warnings`),
+/** @param {string[]} warnings @param {string} key what they are of, to keep them open as the catalog is drawn again */
+function renderWarnings(warnings, key) {
+  return warnings.length > 0 && h('details', { class: 'alert alert-warn', open: openWarnings.has(key),
+      ontoggle: (event) => (event.target.open ? openWarnings.add(key) : openWarnings.delete(key)) },
+    h('summary', { 'data-focus': `warnings ${key}` }, warnings.length === 1 ? '1 warning' : `${warnings.length} warnings`),
     h('ul', {}, warnings.map((warning) => h('li', {}, warning))));
 }
 
 /** @param {Skill} skill @param {string} origin */
 function renderCard(skill, origin) {
-  return h('a', { class: 'card', href: skillHash(origin, skill.id), 'data-skill': skill.id, onclick: () => {
+  const href = skillHash(origin, skill.id);
+  return h('a', { class: 'card', href, 'data-skill': skill.id, 'data-focus': href, onclick: () => {
       catalogScroll = scrollY;
       openedFromCatalog = true;
     } },
@@ -309,6 +352,10 @@ function renderCard(skill, origin) {
 function renderSkill(open) {
   const found = findSkill(open);
   shownSkill = found?.skill;
+  // The same skill again, now that its scan is done: where it was scrolled to.
+  const at = found && `${found.scan.source} ${found.skill.id}`;
+  const again = at === shownAt;
+  shownAt = at;
   const back = h('button', { class: 'button back', type: 'button', onclick: closeSkill }, '← Back to the catalog');
   if (!found) {
     const loading = entries.some((entry) => entry.loading);
@@ -339,7 +386,7 @@ function renderSkill(open) {
           h('dt', {}, 'SKILL.md'), h('dd', {}, h('a', { href: skill.link, target: '_blank', rel: 'noopener noreferrer', 'data-link': '' }, 'Open on GitHub ↗')),
           skill.copies.length > 0 && [h('dt', {}, 'Also in'), h('dd', {}, h('ul', {}, skill.copies.map((copy) => h('li', {}, h('code', {}, copy)))))],
           properties.map(([key, value]) => [h('dt', {}, key), h('dd', {}, formatValue(value))])))));
-  scrollTo(0, 0);
+  if (!again) scrollTo(0, 0);
 }
 
 function formatValue(value) {

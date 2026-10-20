@@ -1,4 +1,5 @@
 import { AtlasError, EmptyRepository, GitHubUnavailable } from './errors.ts';
+import type { Repository, Skill } from './model.ts';
 import type { Rules } from './rules.ts';
 import { scan, type ScanResult, type Source } from './scan.ts';
 
@@ -32,12 +33,16 @@ const AT_ONCE = 8;
  * Each repository, as `scan` does it. A repository that fails is a warning and the rest go on;
  * an empty one has nothing to say. Rate limit, a rejected token or no network stops everything.
  * `scanned` hears of each repository as soon as it is done, in the order they finish: its place in
- * `organization.repositories`, and its result, or undefined if it failed or is empty.
+ * `organization.repositories`, and its result, or undefined if it failed or is empty. Before that,
+ * `found` hears of each of its skills as `scan` finds them, with the repository they are in.
  */
 export async function scanOrganization(
   organization: Organization,
   rules: Rules,
-  scanned?: (index: number, result: ScanResult | undefined) => void,
+  { scanned, found }: {
+    scanned?: (index: number, result: ScanResult | undefined) => void;
+    found?: (index: number, repository: Repository, skill: Skill) => void;
+  } = {},
 ): Promise<OrganizationResult> {
   const results: (ScanResult | string | undefined)[] = [];
   let next = 0;
@@ -47,7 +52,10 @@ export async function scanOrganization(
       const index = next++;
       const repository = organization.repositories[index];
       try {
-        results[index] = await scan(await repository.open(), rules);
+        const source = await repository.open();
+        results[index] = await scan(source, rules, (skill) => {
+          if (!stopped) found?.(index, source.repository, skill);
+        });
       } catch (error) {
         if (error instanceof GitHubUnavailable || !(error instanceof AtlasError)) {
           next = organization.repositories.length; // the other workers stop too

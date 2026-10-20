@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { firstSentence, type RulesStore } from '../commands.ts';
 import { AtlasError } from '../core/errors.ts';
 import { parseGitHubOwnerUrl, parseGitHubUrl } from '../core/github.ts';
-import { skillLink } from '../core/model.ts';
+import { skillLink, type Repository, type Skill } from '../core/model.ts';
 import { scanOrganization, type Organization } from '../core/organization.ts';
 import { parseRules, type Rules } from '../core/rules.ts';
 import { scan, type ScanResult, type Source } from '../core/scan.ts';
@@ -81,6 +81,7 @@ async function scanRequest(input: string, stream: boolean, response: ServerRespo
     // The rules first, as in the CLI: a broken rules file stops the scan before anything is fetched.
     const file = await rules.load(undefined, note);
     const parsed = parseRules(file.text, file.path);
+    if (name && stream) return await streamRepository(await open(input), parsed, name.ref ?? '', response);
     if (name) return send(response, 200, repositoryAnswer(await scan(await open(input), parsed), name.ref ?? ''));
     const organization = await openOwner(input);
     if (stream) return await streamOrganization(organization, parsed, response);
@@ -99,20 +100,48 @@ async function scanRequest(input: string, stream: boolean, response: ServerRespo
   }
 }
 
+/** The start of a line-at-a-time answer; once it is out, a failure can only be a line of its own. */
+function startLines(response: ServerResponse) {
+  response.writeHead(200, { ...HEADERS, 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' });
+  // A page that went away, or stopped listening, hears nothing more.
+  return (body: unknown) => {
+    if (!response.writableEnded && !response.destroyed) response.write(`${JSON.stringify(body)}\n`);
+  };
+}
+
+/**
+ * A repository, a line at a time, so the page shows each skill as soon as it is read: the
+ * repository first, then each skill, then the whole answer, as at once.
+ */
+async function streamRepository(source: Source, rules: Rules, ref: string, response: ServerResponse) {
+  const line = startLines(response);
+  const { repository } = source;
+  line({ type: 'opened', ...repositoryHead(repository, ref) });
+  try {
+    const result = await scan(source, rules, (skill) => line({ type: 'skill', skill: skillAnswer(repository, skill) }));
+    line({ type: 'done', scan: repositoryAnswer(result, ref) });
+  } catch (error) {
+    if (!(error instanceof AtlasError)) throw error;
+    line({ type: 'error', error: error.message });
+  }
+  response.end();
+}
+
 /**
  * An organization, a line at a time, so the page adds each repository as soon as it is scanned:
- * the owner first, then each repository as it is done, then the warnings. Once the first line is
- * out, a failure can only be a line of its own.
+ * the owner first, then each repository's skills as they are read and the repository once it is
+ * done, then the warnings.
  */
 async function streamOrganization(organization: Organization, rules: Rules, response: ServerResponse) {
-  response.writeHead(200, { ...HEADERS, 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' });
-  const line = (body: unknown) => response.write(`${JSON.stringify(body)}\n`);
+  const line = startLines(response);
   const { owner, listed, repositories } = organization;
   line({ type: 'organization', source: owner.url, owner, listed, scanning: repositories.length });
   try {
-    const result = await scanOrganization(organization, rules, (index, scanned) =>
-      line({ type: 'repository', index, repository: scanned && scanned.skills.length > 0 ? repositoryAnswer(scanned, '') : undefined }),
-    );
+    const result = await scanOrganization(organization, rules, {
+      found: (index, repository, skill) => line({ type: 'skill', index, ...repositoryHead(repository, ''), skill: skillAnswer(repository, skill) }),
+      scanned: (index, scanned) =>
+        line({ type: 'repository', index, repository: scanned && scanned.skills.length > 0 ? repositoryAnswer(scanned, '') : undefined }),
+    });
     line({ type: 'done', warnings: result.warnings });
   } catch (error) {
     if (!(error instanceof AtlasError)) throw error;
@@ -123,20 +152,23 @@ async function streamOrganization(organization: Organization, rules: Rules, resp
 
 /** One repository's scan, as the page shows it: each skill with its link, its summary and its body made safe. */
 function repositoryAnswer(result: ScanResult, ref: string) {
-  const { repository } = result;
   return {
-    // What makes two scans the same repository: a new scan of it replaces the old one.
-    source: `https://github.com/${repository.id}${ref ? `/tree/${ref}` : ''}`,
-    ref,
-    repository,
-    skills: result.skills.map(({ body, ...skill }) => {
-      const link = skillLink(repository, { ...skill, body });
-      const raw = link.replace(`${repository.url}/blob/`, `https://raw.githubusercontent.com/${repository.id}/`);
-      const root = { page: `${repository.url}/blob/${repository.commit}/`, raw: `https://raw.githubusercontent.com/${repository.id}/${repository.commit}/` };
-      return { ...skill, summary: firstSentence(skill.description), link, html: renderBody(body, { page: link, raw }, root) };
-    }),
+    ...repositoryHead(result.repository, ref),
+    skills: result.skills.map((skill) => skillAnswer(result.repository, skill)),
     warnings: result.warnings,
   };
+}
+
+function repositoryHead(repository: Repository, ref: string) {
+  // What makes two scans the same repository: a new scan of it replaces the old one.
+  return { source: `https://github.com/${repository.id}${ref ? `/tree/${ref}` : ''}`, ref, repository };
+}
+
+function skillAnswer(repository: Repository, { body, ...skill }: Skill) {
+  const link = skillLink(repository, { ...skill, body });
+  const raw = link.replace(`${repository.url}/blob/`, `https://raw.githubusercontent.com/${repository.id}/`);
+  const root = { page: `${repository.url}/blob/${repository.commit}/`, raw: `https://raw.githubusercontent.com/${repository.id}/${repository.commit}/` };
+  return { ...skill, summary: firstSentence(skill.description), link, html: renderBody(body, { page: link, raw }, root) };
 }
 
 function send(response: ServerResponse, status: number, body: unknown) {

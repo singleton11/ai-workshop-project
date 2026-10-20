@@ -220,7 +220,7 @@ async function lines(address: string, url: string) {
   return { status: response.status, type: response.headers.get('content-type'), text: await response.text() };
 }
 
-test('GET /api/scan for an organization, a line at a time: the owner, each repository as it is done, then the warnings', async (t) => {
+test('GET /api/scan for an organization, a line at a time: the owner, each repository\'s skills as they are read and the repository as it is done, then the warnings', async (t) => {
   // acme/other is held back: acme/tools is done first, yet acme/other keeps its place in the list.
   const server = await holding(['https://api.github.com/repos/acme/other/commits/trunk']);
   t.after(server.close);
@@ -234,14 +234,54 @@ test('GET /api/scan for an organization, a line at a time: the owner, each repos
   // The repositories to scan: the listed ones; the fork is not one of them.
   assert.deepEqual(messages[0], { type: 'organization', source: 'https://github.com/acme', owner: whole.owner, listed: 4, scanning: 4 });
   // empty, lost, other, tools: each is heard of once, with its answer only if it has skills.
-  const repositories = messages.slice(1, -1);
-  assert.deepEqual(repositories.map((message) => message.type), ['repository', 'repository', 'repository', 'repository']);
+  const repositories = messages.filter((message) => message.type === 'repository');
+  assert.equal(repositories.length, 4);
+  assert.deepEqual(messages.slice(1, -1).filter((message) => message.type !== 'skill'), repositories);
   assert.deepEqual(repositories.map((message) => message.index).sort(), [0, 1, 2, 3]);
   assert.equal(repositories.at(-1).repository.source, 'https://github.com/acme/other');
   const withSkills = repositories.filter((message) => message.repository).sort((a, b) => a.index - b.index);
   // The same answers as the whole organization's at once.
   assert.deepEqual(withSkills.map((message) => message.repository), whole.repositories);
   assert.deepEqual(messages.at(-1), { type: 'done', warnings: whole.warnings });
+  // Before its repository, each skill of it, as it is in the answer but for the copies, read later.
+  for (const { index, repository } of withSkills) {
+    const done = messages.findIndex((message) => message.type === 'repository' && message.index === index);
+    const skills = messages.slice(1, done).filter((message) => message.type === 'skill' && message.index === index);
+    assert.deepEqual(skills.map(({ source, ref, repository }) => ({ source, ref, repository })), skills.map(() => ({ source: repository.source, ref: '', repository: repository.repository })));
+    assert.deepEqual(
+      skills.map((message) => message.skill).sort((a, b) => (a.id < b.id ? -1 : 1)),
+      repository.skills.map((skill: { copies: string[] }) => ({ ...skill, copies: [] })).sort((a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : 1)),
+    );
+  }
+});
+
+test('GET /api/scan for a repository, a line at a time: the repository, each skill as it is read, then the whole answer', async (t) => {
+  // The copy of review is held back: deploy, broken and review are read, and certain, before it.
+  const held = `https://raw.githubusercontent.com/acme/tools/${COMMIT}/.github/skills/review/SKILL.md`;
+  const server = await holding([held]);
+  t.after(server.close);
+  const answer = lines(server.address, 'https://github.com/acme/tools');
+  const { body: whole } = await api('https://github.com/acme/tools');
+  setTimeout(() => server.release(held), 50);
+  const { status, type, text } = await answer;
+  assert.equal(status, 200);
+  assert.equal(type, 'application/x-ndjson; charset=utf-8');
+  const messages = text.trimEnd().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(messages[0], { type: 'opened', source: whole.source, ref: '', repository: whole.repository });
+  // The shortest path first: a skill is heard of once every path that could be its main one is read.
+  const skills = messages.slice(1, -1);
+  assert.deepEqual(skills.map((message) => message.skill.path), ['skills/deploy/SKILL.md', '.claude/skills/broken/SKILL.md', '.claude/skills/review/SKILL.md']);
+  const byPath = new Map(whole.skills.map((skill: { path: string }) => [skill.path, skill]));
+  for (const { type, skill } of skills) {
+    assert.equal(type, 'skill');
+    assert.deepEqual(skill, { ...(byPath.get(skill.path) as object), copies: [] });
+  }
+  assert.deepEqual(messages.at(-1), { type: 'done', scan: whole });
+
+  // At a ref too.
+  const tagged = await lines(server.address, 'github.com/acme/tools/tree/v1');
+  const last = JSON.parse(tagged.text.trimEnd().split('\n').at(-1) ?? '');
+  assert.deepEqual(last, { type: 'done', scan: (await api('github.com/acme/tools/tree/v1')).body });
 });
 
 test('a line at a time: what fails before the first line is a 422 as at once; the rate limit on the way, a line of its own', async (t) => {
@@ -250,10 +290,9 @@ test('a line at a time: what fails before the first line is a 422 as at once; th
   const unknown = await lines(server.address, 'github.com/nobody');
   assert.equal(unknown.status, 422);
   assert.deepEqual(JSON.parse(unknown.text), { error: 'Organization or user not found: https://github.com/nobody' });
-  // A repository is one answer, whatever the page asks for.
-  const repository = await lines(server.address, 'github.com/acme/other');
-  assert.equal(repository.type, 'application/json; charset=utf-8');
-  assert.deepEqual(JSON.parse(repository.text), (await api('github.com/acme/other')).body);
+  const missing = await lines(server.address, 'github.com/acme/missing');
+  assert.equal(missing.status, 422);
+  assert.deepEqual(JSON.parse(missing.text), { error: 'Repository not found: https://github.com/acme/missing' });
 
   const { status, text } = await lines(server.address, 'github.com/acme');
   assert.equal(status, 200);
@@ -261,6 +300,18 @@ test('a line at a time: what fails before the first line is a 422 as at once; th
   assert.equal(messages[0].type, 'organization');
   assert.deepEqual(messages.at(-1), { type: 'error', error: 'GitHub rate limit reached; set GITHUB_TOKEN' });
   assert.ok(!messages.some((message) => message.type === 'done'));
+});
+
+test('a repository, a line at a time: a file that fails on the way is the last line, and nothing is heard of after it', async (t) => {
+  const failing = `https://raw.githubusercontent.com/acme/tools/${COMMIT}/.github/skills/review/SKILL.md`;
+  const server = await holding([], { [failing]: { status: 500, body: 'oops' } });
+  t.after(server.close);
+  const { status, text } = await lines(server.address, 'github.com/acme/tools');
+  assert.equal(status, 200);
+  const messages = text.trimEnd().split('\n').map((line) => JSON.parse(line));
+  assert.equal(messages[0].type, 'opened');
+  assert.deepEqual(messages.at(-1), { type: 'error', error: `GitHub answered 500 for ${failing}` });
+  assert.ok(messages.slice(1, -1).every((message) => message.type === 'skill'));
 });
 
 test('a broken rules file → 422 and nothing is fetched', async (t) => {
@@ -325,7 +376,7 @@ async function page(address = '', at = base) {
   const html = await (await fetch(at)).text();
   const dom = new JSDOM(html, { url: `${at}${address}`, runScripts: 'outside-only', pretendToBeVisual: true });
   const { window } = dom;
-  window.fetch = ((url: string, init?: RequestInit) => fetch(new URL(url, at), init)) as typeof window.fetch;
+  window.fetch = serverFetch(at);
   window.scrollTo = () => {};
   window.eval(APP);
   const document = window.document;
@@ -349,6 +400,16 @@ async function page(address = '', at = base) {
       input.dispatchEvent(new window.Event('input'));
     },
   };
+}
+
+/** The page's fetch, to the test server: jsdom's abort signal passed on as one of Node's. */
+function serverFetch(at: string) {
+  return ((url: string, init?: RequestInit) => {
+    const controller = new AbortController();
+    if (init?.signal?.aborted) controller.abort();
+    init?.signal?.addEventListener('abort', () => controller.abort());
+    return fetch(new URL(url, at), { ...init, signal: controller.signal });
+  }) as typeof fetch;
 }
 
 async function until(condition: () => boolean) {
@@ -555,7 +616,6 @@ test('the page: an organization\'s repositories show up as each is scanned, in i
   // The open skill shows as soon as its repository is in, while acme/other is still being scanned.
   await until(() => p.text('#skill-view h1') === 'deploy');
   assert.equal(p.text('#skill-view .lead'), 'Ship to production. Carefully.');
-  assert.equal(p.text('#scan-button'), 'Scanning…');
   (p.$('#skill-view .back') as HTMLButtonElement).click();
   await until(() => p.$('#catalog-view')?.hidden === false);
 
@@ -574,7 +634,6 @@ test('the page: an organization\'s repositories show up as each is scanned, in i
   assert.equal(p.text(`${organization} .organization-head .badge`), '4 skills in 2 of 4 repositories');
   assert.equal(p.$(`${organization} [data-progress]`), null);
   assert.equal(p.text(`${organization} > .alert-warn li`), 'acme/lost: Not found in acme/lost: main; skipped');
-  assert.equal(p.text('#scan-button'), 'Scan');
 });
 
 test('the page: a card opened while its organization is still being scanned has an address that scans it again', async (t) => {
@@ -591,7 +650,7 @@ test('the page: a card opened while its organization is still being scanned has 
   p.$(`[data-organization="acme"] [data-skill="${id}"]`)?.click();
   await until(() => p.text('#skill-view h1') === 'deploy');
   assert.deepEqual(p.params(), ['https://github.com/acme']);
-  assert.equal(p.$('[aria-busy]') !== null || p.text('#scan-button') === 'Scanning…', true);
+  assert.notEqual(p.$('[aria-busy]'), null);
 
   // A reload of that address, before the first scan is done, scans the organization and opens the skill.
   const address = p.window.location.href.slice(server.address.length);
@@ -634,7 +693,7 @@ test('the page: an organization scanned again that fails on the way is left as i
   // The same page, now against a GitHub out of requests for acme/lost.
   const server = await holding([], { 'https://api.github.com/repos/acme/lost/commits/main': RATE_LIMITED });
   t.after(server.close);
-  p.window.fetch = ((url: string, init?: RequestInit) => fetch(new URL(url, server.address), init)) as typeof p.window.fetch;
+  p.window.fetch = serverFetch(server.address);
   await p.scan('https://github.com/acme');
   assert.equal(p.text('#scan-error'), 'GitHub rate limit reached; set GITHUB_TOKEN');
   assert.equal(p.$('#repositories')?.innerHTML, before);
@@ -648,4 +707,124 @@ test('the page: an unknown organization is an error under the input, and the cat
   assert.equal(p.text('#scan-error'), 'Organization or user not found: https://github.com/nobody');
   assert.deepEqual(p.texts('.repository-name'), ['acme/other']);
   assert.deepEqual(p.params(), ['https://github.com/acme/other']);
+});
+
+test('the page: a repository\'s skills show up as each is read; the page is all there while it goes on', async (t) => {
+  const held = `https://raw.githubusercontent.com/acme/tools/${COMMIT}/.github/skills/review/SKILL.md`;
+  const server = await holding([held]);
+  t.after(server.close);
+  const p = await page('', server.address);
+  (p.$('#scan-url') as HTMLInputElement).value = 'github.com/acme/tools';
+  (p.$('#scan-form') as HTMLFormElement).requestSubmit();
+  const tools = '[data-repository="acme/tools"]';
+  await until(() => p.all(`${tools} .card`).length === 3);
+  // Its commit and its cards, sorted, while the copy of review is still being read.
+  assert.equal(p.$(tools)?.getAttribute('aria-busy'), 'true');
+  assert.deepEqual(p.texts(`${tools} .badge`), ['3 skills', COMMIT.slice(0, 7)]);
+  assert.deepEqual(p.texts('.card-title'), ['broken', 'deploy', 'review']);
+  assert.deepEqual(p.params(), ['https://github.com/acme/tools']);
+  // The same URL again, meanwhile: it is being scanned already.
+  (p.$('#scan-url') as HTMLInputElement).value = 'https://github.com/acme/tools';
+  (p.$('#scan-form') as HTMLFormElement).requestSubmit();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal((p.$('#scan-url') as HTMLInputElement).value, '');
+  assert.equal(p.all(`${tools} .card`).length, 3);
+  // Another scan, and the filter, meanwhile.
+  assert.equal((p.$('#scan-button') as HTMLButtonElement).disabled, false);
+  assert.equal(p.text('#scan-button'), 'Scan');
+  (p.$('#scan-url') as HTMLInputElement).value = 'github.com/acme/other';
+  (p.$('#scan-form') as HTMLFormElement).requestSubmit();
+  await until(() => p.$('[data-repository="acme/other"]:not([aria-busy]) .card') !== null);
+  assert.deepEqual(p.texts('.repository-name'), ['acme/tools', 'acme/other']);
+  assert.equal(p.$(tools)?.getAttribute('aria-busy'), 'true');
+  p.filter('review');
+  assert.deepEqual(p.texts('.card-title'), ['review']);
+  p.filter('');
+
+  // review opens; its copy is in once the scan is done, and the skill stays open, where it was scrolled to.
+  let scrolled = 0;
+  p.window.scrollTo = () => void scrolled++;
+  p.$(`${tools} [data-skill="acme/tools:.claude/skills/review/SKILL.md"]`)?.click();
+  await until(() => p.text('#skill-view h1') === 'review');
+  const meta = () => Object.fromEntries(p.all('.meta dt').map((dt) => [dt.textContent, dt.nextElementSibling?.textContent?.trim()]));
+  assert.equal(meta()['Also in'], undefined);
+  assert.equal(scrolled, 1);
+  server.release(held);
+  await until(() => meta()['Also in'] === '.github/skills/review/SKILL.md');
+  assert.equal(p.text('#skill-view h1'), 'review');
+  assert.equal(scrolled, 1);
+  (p.$('#skill-view .back') as HTMLButtonElement).click();
+  await until(() => p.$('#catalog-view')?.hidden === false);
+  assert.equal(p.$('[aria-busy]'), null);
+  assert.equal(p.text('#count'), '4 skills');
+  assert.equal(p.text(`${tools} .alert-warn summary`), '1 warning');
+});
+
+test('the page: an organization\'s repository shows up as its skills are read; one that fails on the way is taken out again, a warning', async (t) => {
+  const held = `https://raw.githubusercontent.com/acme/tools/${COMMIT}/.github/skills/review/SKILL.md`;
+  const server = await holding([held], { [held]: { status: 500, body: 'oops' } });
+  t.after(server.close);
+  const p = await page('', server.address);
+  (p.$('#scan-url') as HTMLInputElement).value = 'github.com/acme';
+  (p.$('#scan-form') as HTMLFormElement).requestSubmit();
+  const tools = '[data-organization="acme"] [data-repository="acme/tools"]';
+  await until(() => p.all(`${tools} .card`).length === 3 && p.texts('[data-organization="acme"] .repository .repository-name').length === 2);
+  assert.equal(p.$(tools)?.getAttribute('aria-busy'), 'true');
+  assert.equal(p.$('[data-organization="acme"] [data-repository="acme/other"]')?.getAttribute('aria-busy'), null);
+  assert.equal(p.text('[data-organization="acme"] .organization-head .badge'), '4 skills in 2 of 4 repositories');
+
+  server.release(held);
+  await until(() => !p.$('[aria-busy]'));
+  assert.equal(p.text('#scan-error'), '');
+  assert.deepEqual(p.texts('[data-organization="acme"] .repository .repository-name'), ['acme/other']);
+  assert.equal(p.text('[data-organization="acme"] .organization-head .badge'), '1 skill in 1 of 4 repositories');
+  assert.ok(p.texts('[data-organization="acme"] > .alert-warn li').includes(`acme/tools: GitHub answered 500 for ${held}; skipped`));
+});
+
+test('the page: an entry removed while it is being scanned is gone, its scan with it', async (t) => {
+  const held = 'https://api.github.com/repos/acme/other/commits/trunk';
+  const server = await holding([held]);
+  t.after(server.close);
+  const p = await page('', server.address);
+  await p.scan('github.com/acme/tools');
+  const signals: AbortSignal[] = [];
+  const pageFetch = p.window.fetch;
+  p.window.fetch = ((url: string, init?: RequestInit) => (init?.signal && signals.push(init.signal), pageFetch(url, init))) as typeof fetch;
+  (p.$('#scan-url') as HTMLInputElement).value = 'github.com/acme';
+  (p.$('#scan-form') as HTMLFormElement).requestSubmit();
+  await until(() => p.$('[data-organization="acme"] [data-repository="acme/tools"]') !== null);
+  assert.equal(signals.length, 1);
+  assert.equal(signals[0].aborted, false);
+  (p.$('[data-organization="acme"] .organization-head .button-ghost') as HTMLButtonElement).click();
+  assert.equal(signals[0].aborted, true);
+  assert.deepEqual(p.texts('.organization-name'), []);
+  assert.deepEqual(p.params(), ['https://github.com/acme/tools']);
+  server.release(held);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(p.texts('.organization-name'), []);
+  assert.deepEqual(p.texts('.repository-name'), ['acme/tools']);
+  assert.deepEqual(p.params(), ['https://github.com/acme/tools']);
+  assert.equal(p.$('#scan-error')?.hidden, true);
+});
+
+test('the page: open warnings stay open, and a focused card keeps the focus, as a scan draws the catalog again', async (t) => {
+  const held = 'https://api.github.com/repos/acme/other/commits/trunk';
+  const server = await holding([held]);
+  t.after(server.close);
+  const p = await page('', server.address);
+  await p.scan('github.com/acme/tools');
+  const details = p.$('[data-repository="acme/tools"] .alert-warn') as HTMLDetailsElement;
+  details.open = true;
+  details.dispatchEvent(new p.window.Event('toggle'));
+  const card = '[data-repository="acme/tools"] [data-skill="acme/tools:skills/deploy/SKILL.md"]';
+  p.$(card)?.focus();
+  (p.$('#scan-url') as HTMLInputElement).value = 'github.com/acme';
+  (p.$('#scan-form') as HTMLFormElement).requestSubmit();
+  await until(() => p.$('[data-organization="acme"] [data-repository="acme/tools"]') !== null);
+  assert.notEqual(p.$('[data-repository="acme/tools"] .alert-warn'), details); // drawn again
+  assert.equal((p.$('#repositories > [data-repository="acme/tools"] .alert-warn') as HTMLDetailsElement).open, true);
+  assert.equal(p.window.document.activeElement, p.$(`#repositories > ${card}`));
+  server.release(held);
+  await until(() => !p.$('[aria-busy]'));
+  assert.equal((p.$('#repositories > [data-repository="acme/tools"] .alert-warn') as HTMLDetailsElement).open, true);
 });
