@@ -23,6 +23,14 @@ Web: a thin client too, [web.md](web.md).
 - Malformed front matter → a *warning*, the scan goes on; so is one that refers to itself
   (`a: &m { self: *m }`)
 - Unreachable repository → a clear message, exit code 1
+- **An error partway does not lose what was read.** Once the repository and its commit are known,
+  a failure (rate limit, no network, a GitHub error) while listing or reading the files ends the
+  scan with that *error*, but the skills read before it are kept, with their warnings. Code search
+  keeps the pages before the one that failed; a tree folder that fails adds nothing, the others do;
+  a `SKILL.md` or link that cannot be read is left out, not warned about as missing. After a failed
+  code search, no symbolic links are looked for: they could point at a file it did not reach.
+  The error is the first one: the listing's, else a link's, else a file's, in path order.
+  Before the commit is known there is nothing to keep: the error is all there is.
 
 ## What is a skill
 

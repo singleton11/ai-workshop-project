@@ -17,6 +17,10 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
 - A filter box narrows the cards by name, description or path, in any letter case.
 - Warnings are shown with their repository; an error (not found, rate limit, not a URL) is shown
   under the input, and the catalog is left as it was.
+- A scan that stopped partway ([analysis](analysis.md#details)): a repository new to the catalog
+  is added with the skills read before it, and the error with it, `Scan incomplete: <message>`.
+  A repository already in the catalog keeps the skills it has: the error is shown under the input,
+  `Scan incomplete: <message>; <owner>/<repo> is left as it was`.
 
 ## A skill
 
@@ -37,7 +41,8 @@ The scanned URLs are in the page's address (`?repo=<url>&repo=<url>`, the open s
 ## API
 
 `GET /api/scan?url=<GitHub URL>` →
-`200 { source, ref, repository, skills: [{ id, name, description, summary, path, link, commit, copies, properties, html }], warnings }`.
+`200 { source, ref, repository, skills: [{ id, name, description, summary, path, link, commit, copies, properties, html }], warnings, error? }`;
+`error` only when the scan stopped partway: the skills are those read before it.
 `source` is `https://github.com/<owner>/<repo>[/tree/<ref>]`, whatever way the URL was written: the
 same `source` is the same repository in the catalog. `summary` is the description's first sentence;
 `html`, the body, made safe as above.

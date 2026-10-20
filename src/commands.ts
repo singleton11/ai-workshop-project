@@ -70,6 +70,8 @@ async function scanCommand(args: string[], context: Context) {
   const skills = text ? result.skills.filter((skill) => matches(skill, text)) : result.skills;
   printRepository(result.repository, skills, text ? result.skills.length : undefined, context);
   for (const warning of result.warnings) context.error(`warning: ${warning}`);
+  // What was read before the scan stopped is printed above; the error still makes it a failure.
+  if (result.error !== undefined) throw new AtlasError(`scan incomplete: ${result.error}`);
 }
 
 async function rulesCommand(args: string[], context: Context) {

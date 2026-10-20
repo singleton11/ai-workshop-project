@@ -5,7 +5,7 @@
 /** @typedef {{ id: string, name: string, description: string, summary: string, path: string, link: string,
  *   commit: string, copies: string[], properties: Record<string, unknown>, html: string }} Skill */
 /** @typedef {{ source: string, ref: string, repository: { id: string, url: string, commit: string },
- *   skills: Skill[], warnings: string[] }} Scan */
+ *   skills: Skill[], warnings: string[], error?: string }} Scan */
 /** @typedef {{ key: string, scan?: Scan, loading: boolean }} Entry */
 
 const $ = (id) => document.getElementById(id);
@@ -49,6 +49,8 @@ async function scan(input) {
     const result = body;
     // Another URL for a repository already here: the new scan replaces it, where it was.
     const same = entries.find((other) => other !== entry && other.scan?.source === result.source);
+    // A scan that stopped early does not replace the skills already in the catalog.
+    if (result.error && (existing?.scan || same)) throw new Error(`Scan incomplete: ${result.error}; ${result.repository.id} is left as it was`);
     if (same) entries = entries.filter((other) => other !== entry);
     Object.assign(same ?? entry, { key: result.source, scan: result, loading: false });
     if (!existing) $('scan-url').value = '';
@@ -146,6 +148,8 @@ function renderRepository(entry) {
       h('span', { class: 'badge badge-muted', title: scan.repository.commit }, scan.repository.commit.slice(0, 7)),
       entry.loading && h('span', { class: 'spinner', 'aria-label': 'Scanning' }),
       h('button', { class: 'button button-ghost', type: 'button', onclick: () => remove(entry), title: `Remove ${scan.repository.id}` }, 'Remove')),
+    scan.error && h('p', { class: 'alert alert-error', role: 'alert' },
+      `Scan incomplete: ${scan.error}. These are the skills read before it; scan again for the rest.`),
     scan.warnings.length > 0 && h('details', { class: 'alert alert-warn' },
       h('summary', {}, scan.warnings.length === 1 ? '1 warning' : `${scan.warnings.length} warnings`),
       h('ul', {}, scan.warnings.map((warning) => h('li', {}, warning)))),

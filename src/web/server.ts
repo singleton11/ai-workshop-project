@@ -88,6 +88,8 @@ async function scanRequest(input: string, response: ServerResponse, { open, rule
         return { ...skill, summary: firstSentence(skill.description), link, html: renderBody(body, { page: link, raw }, root) };
       }),
       warnings: result.warnings,
+      // The scan stopped before it ended: the skills are the ones read before it.
+      ...(result.error === undefined ? {} : { error: result.error }),
     });
   } catch (error) {
     if (!(error instanceof AtlasError)) throw error;
