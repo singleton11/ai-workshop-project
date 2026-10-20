@@ -7,20 +7,24 @@ export type Base = { page: string; raw: string };
 
 const SAFE = new Set(['http:', 'https:', 'mailto:']);
 
-export function renderBody(markdown: string, base: Base): string {
+/**
+ * `base`: the SKILL.md, for relative links; `root`: the repository at the scanned commit, for
+ * root-relative ones (`/docs/x.md`), as GitHub resolves them.
+ */
+export function renderBody(markdown: string, base: Base, root: Base): string {
   const marked = new Marked({
     gfm: true,
     renderer: {
       html: ({ text }: Tokens.HTML | Tokens.Tag) => escape(text),
       link(token: Tokens.Link) {
         const text = this.parser.parseInline(token.tokens);
-        const href = resolve(token.href, base.page);
+        const href = resolve(token.href, base.page, root.page);
         if (!href) return text;
         const title = token.title ? ` title="${escape(token.title)}"` : '';
         return `<a href="${escape(href)}"${title} target="_blank" rel="noopener noreferrer">${text}</a>`;
       },
       image(token: Tokens.Image) {
-        const src = resolve(token.href, base.raw);
+        const src = resolve(token.href, base.raw, root.raw);
         if (!src || src.startsWith('mailto:')) return escape(token.text);
         return `<img src="${escape(src)}" alt="${escape(token.text)}" loading="lazy">`;
       },
@@ -30,9 +34,10 @@ export function renderBody(markdown: string, base: Base): string {
 }
 
 /** An absolute URL with a safe scheme, or undefined. */
-function resolve(href: string, base: string): string | undefined {
+function resolve(href: string, base: string, root: string): string | undefined {
   try {
-    const url = new URL(href, base);
+    const rooted = href.startsWith('/') && !href.startsWith('//');
+    const url = rooted ? new URL(href.replace(/^\/+/, ''), root) : new URL(href, base);
     return SAFE.has(url.protocol) ? url.href : undefined;
   } catch {
     return undefined;

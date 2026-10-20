@@ -26,7 +26,8 @@ rendered as Markdown. *Back* returns to the catalog.
 
 The body comes from someone else's repository: raw HTML in it is shown as text, links other than
 `http(s):`, `mailto:` and relative ones are dropped, and the page allows no inline script.
-Relative links and images resolve against the `SKILL.md` on GitHub at the scanned commit.
+Relative links and images resolve against the `SKILL.md` on GitHub at the scanned commit;
+root-relative ones (`/docs/x.md`), against the repository root at that commit, as on GitHub.
 
 ## Nothing is stored
 

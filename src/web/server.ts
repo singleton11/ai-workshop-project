@@ -37,6 +37,7 @@ const HEADERS = {
 export function createWebServer(options: WebOptions): Server {
   return createServer((request, response) => {
     handle(request, response, options).catch((error: unknown) => {
+      if (response.headersSent) return void response.destroy();
       send(response, 500, { error: `Unexpected error: ${error instanceof Error ? error.message : String(error)}` });
     });
   });
@@ -83,7 +84,8 @@ async function scanRequest(input: string, response: ServerResponse, { open, rule
       skills: result.skills.map(({ body, ...skill }) => {
         const link = skillLink(repository, { ...skill, body });
         const raw = link.replace(`${repository.url}/blob/`, `https://raw.githubusercontent.com/${repository.id}/`);
-        return { ...skill, summary: firstSentence(skill.description), link, html: renderBody(body, { page: link, raw }) };
+        const root = { page: `${repository.url}/blob/${repository.commit}/`, raw: `https://raw.githubusercontent.com/${repository.id}/${repository.commit}/` };
+        return { ...skill, summary: firstSentence(skill.description), link, html: renderBody(body, { page: link, raw }, root) };
       }),
       warnings: result.warnings,
     });
@@ -94,6 +96,8 @@ async function scanRequest(input: string, response: ServerResponse, { open, rule
 }
 
 function send(response: ServerResponse, status: number, body: unknown) {
+  // Before the headers: a body that cannot be serialized is still a 500, not a crash.
+  const text = JSON.stringify(body);
   response.writeHead(status, { ...HEADERS, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-  response.end(JSON.stringify(body));
+  response.end(text);
 }

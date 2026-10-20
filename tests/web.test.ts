@@ -28,6 +28,7 @@ metadata:
 <script>alert('raw html')</script>
 
 See [the guide](docs/guide.md), [an anchor](#steps), [bad](javascript:alert(1)) and [mail](mailto:a@example.com).
+From the root: [the spec](/docs/spec.md) and ![logo](/assets/logo.png).
 
 ![diagram](img/flow.png)
 `;
@@ -122,7 +123,7 @@ test('GET /api/scan: the skills, sorted, each with its link, summary, copies, pr
   assert.deepEqual(body.warnings, ['.claude/skills/broken/SKILL.md: malformed front matter: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 14; using the directory name']);
 });
 
-test('the body is made safe: raw HTML is text, unsafe links are dropped, relative ones go to GitHub', async () => {
+test('the body is made safe: raw HTML is text, unsafe links are dropped, relative and root-relative ones go to GitHub', async () => {
   const { body } = await api('github.com/acme/tools');
   const html: string = body.skills[2].html;
   const page = `https://github.com/acme/tools/blob/${COMMIT}/.claude/skills/review`;
@@ -133,6 +134,8 @@ test('the body is made safe: raw HTML is text, unsafe links are dropped, relativ
   assert.match(html, new RegExp(`<a href="${page}/docs/guide.md" target="_blank" rel="noopener noreferrer">the guide</a>`));
   assert.match(html, new RegExp(`<a href="${page}/SKILL.md#steps"`));
   assert.match(html, /<a href="mailto:a@example.com"/);
+  assert.match(html, new RegExp(`<a href="https://github.com/acme/tools/blob/${COMMIT}/docs/spec.md"`));
+  assert.match(html, new RegExp(`<img src="https://raw.githubusercontent.com/acme/tools/${COMMIT}/assets/logo.png" alt="logo"`));
   assert.match(html, new RegExp(`<img src="https://raw.githubusercontent.com/acme/tools/${COMMIT}/.claude/skills/review/img/flow.png" alt="diagram"`));
 });
 
