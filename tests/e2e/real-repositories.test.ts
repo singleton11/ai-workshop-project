@@ -9,10 +9,12 @@
 // To move a repository to a newer commit, change its commit below, then update and review the diff.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_RULES } from '../../src/core/rules.ts';
 import { CLI } from '../helpers.ts';
 
 const REPOSITORIES = [
@@ -24,10 +26,17 @@ const REPOSITORIES = [
 const SNAPSHOTS = fileURLToPath(new URL('./snapshots', import.meta.url));
 const update = process.execArgv.includes('--test-update-snapshots');
 
+// A rules file that already exists, so the output does not depend on the machine's config folder.
+const rulesFile = join(mkdtempSync(join(tmpdir(), 'skill-atlas-e2e-')), 'rules.yaml');
+writeFileSync(rulesFile, DEFAULT_RULES);
+
 for (const { repository, commit } of REPOSITORIES) {
   test(repository, { timeout: 120_000 }, () => {
     const args = ['scan', `github.com/${repository}/tree/${commit}`];
-    const scanned = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8' });
+    const scanned = spawnSync(process.execPath, [CLI, ...args], {
+      encoding: 'utf8',
+      env: { ...process.env, SKILL_ATLAS_RULES: rulesFile },
+    });
     assert.equal(scanned.error, undefined);
     // A scan that failed, say on the rate limit, is never a snapshot.
     assert.equal(scanned.status, 0, scanned.stderr);
