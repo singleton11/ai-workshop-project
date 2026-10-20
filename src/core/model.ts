@@ -22,6 +22,10 @@ export type Skill = {
   commit: string;
   /** The same skill in other agents' folders. */
   copies: string[];
+  /** The other front matter keys. */
+  properties: Record<string, unknown>;
+  /** The Markdown after the front matter. */
+  body: string;
 };
 
 /**

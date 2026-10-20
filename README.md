@@ -13,6 +13,10 @@ build-tools-bump-gradle-api — Bumps the Gradle API version that Kotlin Gradle 
 …
 ```
 
+`./skill-atlas serve` opens the same scan in a browser, at http://localhost:4173/: paste repository
+links, and the skills fill a catalog you can filter; a card opens the skill, its front matter and its
+rendered body. See [spec/web.md](spec/web.md).
+
 Set `GITHUB_TOKEN` for a higher GitHub rate limit. What is a skill, and what is test data, is set by
 [rules](spec/rules.md): the first scan writes them to `~/.config/skill-atlas/rules.yaml`, yours to edit;
 `./skill-atlas rules` shows them. `npm test` runs the tests.

@@ -61,6 +61,8 @@ export async function scan(source: Source, rules: Rules): Promise<ScanResult> {
       description: parsed.description,
       commit: source.repository.commit,
       copies,
+      properties: parsed.properties,
+      body: parsed.body,
     });
   }
   warnings.push(...parseWarnings.sort(compare));

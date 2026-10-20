@@ -12,7 +12,8 @@ Every `SKILL.md`: **name**, **description**, **link**
 
 Core: fetch → find ([rules](rules.md)) → parse. The rules are an input to the core; the core never
 reads or writes the rules file. CLI: a *thin client*; it loads the rules, or creates them.
-Skill: id = `repo:path`, name, description, commit
+Skill: id = `repo:path`, name, description, commit, the other front matter keys, the body.
+Web: a thin client too, [web.md](web.md).
 
 ## Details
 
