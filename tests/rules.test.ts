@@ -7,7 +7,7 @@ import { test, type TestContext } from 'node:test';
 import { createBrowserBackend } from '../src/browser.ts';
 import { DEFAULT_RULES } from '../src/core/rules.ts';
 import { rulesFile } from '../src/rules-file.ts';
-import { atlas, FIXTURE } from './helpers.ts';
+import { atlas, FIXTURE, found, OWN_SKILLS } from './helpers.ts';
 
 const ROOT = join(FIXTURE, '..');
 
@@ -94,12 +94,12 @@ test('the user’s own patterns: a product folder becomes a skill, the fixture s
   assert.match(result.stdout, / · 1 skill\nfoo — Shipped\.\n/);
 
   const itself = await atlas(['scan', '--rules', own, ROOT]);
-  assert.match(itself.stdout, /^\S+ · 3 skills\n/);
+  assert.match(itself.stdout, found(3 + OWN_SKILLS.length));
 });
 
 test('a key left out keeps its default; [] means none', async (t) => {
   const leftOut = await atlas(['scan', '--rules', rulesWith(t, 'version: 1\n'), ROOT]);
-  assert.match(leftOut.stdout, / · 0 skills$/);
+  assert.match(leftOut.stdout, found(OWN_SKILLS.length));
   assert.match(leftOut.stderr, /test data/);
 
   const none = await atlas(['scan', '--rules', rulesWith(t, 'skills: []\n'), FIXTURE]);
@@ -113,7 +113,7 @@ test('each kind of warning can be turned off', async (t) => {
 
   const noTestData = rulesWith(t, 'warnings:\n  test-data: false\n');
   const itself = await atlas(['scan', '--rules', noTestData, ROOT]);
-  assert.match(itself.stdout, / · 0 skills$/);
+  assert.match(itself.stdout, found(OWN_SKILLS.length));
   assert.equal(itself.stderr, '');
 
   const sameName = mkdtempSync(join(tmpdir(), 'skill-atlas-repo-'));
