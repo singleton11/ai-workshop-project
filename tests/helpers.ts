@@ -43,6 +43,8 @@ export const EXAMPLE: Recording = {
 export type AtlasOptions = {
   /** More recorded GitHub answers, next to EXAMPLE. */
   recording?: Recording;
+  /** What answers a URL that is not recorded. */
+  fallback?: Fetch;
   /** Without a token, GitHub is listed through the tree. */
   token?: string;
   /** The rules: the defaults, kept in memory, unless given. */
@@ -60,7 +62,7 @@ export const DEFAULTS: RulesStore = {
 
 /** `skill-atlas <args>`, as the CLI runs it, with GitHub answering from EXAMPLE. */
 export async function atlas(args: string[], options: AtlasOptions = {}) {
-  const github = options.fetch ?? replay({ ...EXAMPLE, ...options.recording });
+  const github = options.fetch ?? replay({ ...EXAMPLE, ...options.recording }, options.fallback);
   const token = 'token' in options ? options.token : 'test';
   const stdout: string[] = [];
   const stderr: string[] = [];

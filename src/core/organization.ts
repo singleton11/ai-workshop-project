@@ -53,9 +53,15 @@ export async function scanOrganization(
       const repository = organization.repositories[index];
       try {
         const source = await repository.open();
-        results[index] = await scan(source, rules, (skill) => {
+        const result = await scan(source, rules, (skill) => {
           if (!stopped) found?.(index, source.repository, skill);
         });
+        if (result.error !== undefined && stopsOrganization(result.error)) {
+          next = organization.repositories.length;
+          stopped = true;
+          throw new GitHubUnavailable(result.error);
+        }
+        results[index] = result;
       } catch (error) {
         if (error instanceof GitHubUnavailable || !(error instanceof AtlasError)) {
           next = organization.repositories.length; // the other workers stop too
@@ -75,7 +81,17 @@ export async function scanOrganization(
   for (const result of results) {
     if (typeof result === 'string') warnings.push(result);
     else if (result && result.skills.length > 0) repositories.push(result);
-    else if (result) warnings.push(...result.warnings.map((warning) => `${result.repository.id}: ${warning}`));
+    else if (result) {
+      warnings.push(...result.warnings.map((warning) => `${result.repository.id}: ${warning}`));
+      if (result.error !== undefined) warnings.push(`${result.repository.id}: ${result.error}; skipped`);
+    }
   }
   return { owner: organization.owner, listed: organization.listed, repositories, warnings };
+}
+
+/** Rate limits and connection failures affect every repository, so they stop the organization scan. */
+function stopsOrganization(error: string): boolean {
+  return error.startsWith('GitHub rate limit reached;') ||
+    error.startsWith('GitHub rejected the token in GITHUB_TOKEN') ||
+    error.startsWith('Cannot reach GitHub:');
 }

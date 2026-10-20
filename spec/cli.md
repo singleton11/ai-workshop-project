@@ -10,6 +10,8 @@ file tree: code search sees only the default branch. An unknown ref → a clear 
 Prints the result **at once**; a scan's result is *never stored*. The only file skill-atlas
 writes is the [rules](rules.md) file, on the first scan.
 `GITHUB_TOKEN`, optional: a higher GitHub rate limit.
+A scan that stopped partway ([analysis](analysis.md#details)) prints the skills it read, as usual
+(`--filter` too), and its warnings; then `scan incomplete: <message>` on *stderr*, exit code 1.
 ## Output
 ```
 JetBrains/kotlin · 6 skills

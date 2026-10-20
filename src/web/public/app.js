@@ -9,7 +9,7 @@
 /** @typedef {{ id: string, name: string, description: string, summary: string, path: string, link: string,
  *   commit: string, copies: string[], properties: Record<string, unknown>, html: string }} Skill */
 /** @typedef {{ source: string, ref: string, repository: { id: string, url: string, commit: string },
- *   skills: Skill[], warnings: string[], reading?: boolean }} Scan */
+ *   skills: Skill[], warnings: string[], error?: string, reading?: boolean }} Scan */
 /** @typedef {{ source: string, owner: { id: string, url: string }, listed: number, repositories: Scan[],
  *   warnings: string[], scanning?: number, scanned?: number }} OrganizationScan */
 /** @typedef {{ key: string, scan?: Scan | OrganizationScan, loading: boolean, controller?: AbortController }} Entry */
@@ -67,6 +67,8 @@ async function scan(input) {
    */
   const show = (result) => {
     const same = entries.find((other) => other !== entry && other.scan?.source === result.source);
+    // A scan that stopped early does not replace the skills already in the catalog.
+    if (result.error && (existing?.scan || same)) throw new Error(`Scan incomplete: ${result.error}; ${result.repository.id} is left as it was`);
     if (same && same !== target) {
       entries = entries.filter((other) => other !== entry);
       target = same;
@@ -110,8 +112,8 @@ async function scan(input) {
 
 /**
  * A scan, a line at a time: a repository's skills as the server reads them; an organization's
- * repositories, each as its skills are read, in the order the organization lists them. A failure on
- * the way fails the whole scan.
+ * repositories, each as its skills are read, in the order the organization lists them. Errors that
+ * leave a partial result arrive in that result; errors that stop the scan are raised.
  * @param {Response} response @param {(scan: Scan | OrganizationScan) => void} show
  */
 async function readLines(response, show) {
@@ -319,6 +321,8 @@ function renderRepository(scan, origin, entry) {
       h('span', { class: 'badge badge-muted', title: scan.repository.commit }, scan.repository.commit.slice(0, 7)),
       reading && h('span', { class: 'spinner', 'aria-label': 'Scanning' }),
       entry && removeButton(entry, scan.repository.id)),
+    scan.error && h('p', { class: 'alert alert-error', role: 'alert' },
+      `Scan incomplete: ${scan.error}. These are the skills read before it; scan again for the rest.`),
     renderWarnings(scan.warnings, `${origin} ${scan.source}`),
     skills.length > 0
       ? h('div', { class: 'grid' }, skills.map((skill) => renderCard(skill, origin)))

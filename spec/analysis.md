@@ -24,6 +24,15 @@ Web: a thin client too, [web.md](web.md).
 - Malformed front matter → a *warning*, the scan goes on; so is one that refers to itself
   (`a: &m { self: *m }`)
 - Unreachable repository → a clear message, exit code 1
+- **An error partway does not lose what was read.** Once the repository and its commit are known,
+  a failure (rate limit, no network, a connection that drops while an answer downloads, a GitHub
+  error) while listing or reading the files ends the scan with that *error*, but the skills read
+  before it are kept, with their warnings. Code search
+  keeps the pages before the one that failed; a tree folder that fails adds nothing, the others do;
+  a `SKILL.md` or link that cannot be read is left out, not warned about as missing. After a failed
+  code search, no symbolic links are looked for: they could point at a file it did not reach.
+  The error is the first one: the listing's, else a link's, else a file's, in path order.
+  Before the commit is known there is nothing to keep: the error is all there is.
 
 ## An organization
 
@@ -43,6 +52,8 @@ the organization, or the user, owns is scanned, each as on its own, with the sam
 - A repository that fails (it went away, an answer GitHub cannot give) is a *warning*,
   `<owner>/<repo>: <message>; skipped`, and the scan goes on; an empty one (no commit) is skipped
   without one. The warnings of a repository without skills are kept, `<owner>/<repo>: <warning>`.
+- A repository scan that stops partway keeps its successfully read skills and warnings. If it has
+  skills, its partial error stays with it; with no skills, its error is an organization warning.
 - Rate limit, a rejected token or no network **stops** the scan: a clear message, exit code 1,
   nothing printed; every other repository would fail the same way.
 - An unknown owner → `Organization or user not found: https://github.com/<owner>`, exit code 1.

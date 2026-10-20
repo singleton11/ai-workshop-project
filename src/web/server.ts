@@ -163,6 +163,7 @@ function repositoryAnswer(result: ScanResult, ref: string) {
     ...repositoryHead(result.repository, ref),
     skills: result.skills.map((skill) => skillAnswer(result.repository, skill)),
     warnings: result.warnings,
+    ...(result.error === undefined ? {} : { error: result.error }),
   };
 }
 

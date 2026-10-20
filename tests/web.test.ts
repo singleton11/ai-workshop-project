@@ -15,6 +15,7 @@ import { atlas, CLI, DEFAULTS, FIXTURE } from './helpers.ts';
 const COMMIT = '1111111111111111111111111111111111111111';
 const TAGGED = '2222222222222222222222222222222222222222';
 const OTHER = '3333333333333333333333333333333333333333';
+const FLAKY = '4444444444444444444444444444444444444444';
 
 const REVIEW = `---
 name: review
@@ -65,6 +66,12 @@ const RECORDING: Recording = {
   [`https://api.github.com/repos/acme/other/git/trees/${OTHER}?recursive=1`]: tree(['.claude/skills/triage/SKILL.md']),
   ...raw('acme/other', OTHER, '.claude/skills/triage/SKILL.md', '---\nname: triage\ndescription: Sort new issues.\n---\nSteps.\n'),
   'https://api.github.com/repos/acme/missing': { status: 404, body: { message: 'Not Found' } },
+  // acme/flaky: GitHub fails on one of its two skills; at tag v2, on its only one.
+  'https://api.github.com/repos/acme/flaky': { status: 200, body: { full_name: 'acme/flaky', default_branch: 'main' } },
+  'https://api.github.com/repos/acme/flaky/commits/main': { status: 200, body: { sha: FLAKY } },
+  [`https://api.github.com/repos/acme/flaky/git/trees/${FLAKY}?recursive=1`]: tree(['skills/alpha/SKILL.md', 'skills/beta/SKILL.md']),
+  ...raw('acme/flaky', FLAKY, 'skills/alpha/SKILL.md', '---\nname: alpha\ndescription: Read before the error.\n---\n'),
+  [`https://raw.githubusercontent.com/acme/flaky/${FLAKY}/skills/beta/SKILL.md`]: { status: 500, body: 'oops' },
   // acme, the organization: tools and other, a fork never opened, an empty one and one gone.
   'https://api.github.com/users/acme': { status: 200, body: { login: 'acme', type: 'Organization' } },
   'https://api.github.com/orgs/acme/repos?type=all&per_page=100&page=1': {
@@ -168,6 +175,15 @@ test('a missing or bad URL, or a local directory → 400; what the CLI explains 
   assert.deepEqual(await api(FIXTURE), { status: 400, body: { error: `Not a GitHub repository or organization URL: ${FIXTURE}` } });
   assert.deepEqual(await api('https://gitlab.com/a/b'), { status: 400, body: { error: 'Not a GitHub repository or organization URL: https://gitlab.com/a/b' } });
   assert.deepEqual(await api('github.com/acme/missing'), { status: 422, body: { error: 'Repository not found: https://github.com/acme/missing' } });
+});
+
+test('a scan that stopped partway → 200, the skills read before it, and the error', async () => {
+  const { status, body } = await api('https://github.com/acme/flaky');
+  assert.equal(status, 200);
+  assert.deepEqual(body.skills.map((skill: { name: string }) => skill.name), ['alpha']);
+  assert.deepEqual(body.warnings, []);
+  assert.equal(body.error, `GitHub answered 500 for https://raw.githubusercontent.com/acme/flaky/${FLAKY}/skills/beta/SKILL.md`);
+  assert.equal('error' in (await api('https://github.com/acme/tools')).body, false);
 });
 
 test('GET /api/scan for an organization: its repositories with skills, each as for one, and the other warnings', async () => {
@@ -311,7 +327,7 @@ test('a line at a time: what fails before the first line is a 422 as at once; th
   assert.ok(!messages.some((message) => message.type === 'done'));
 });
 
-test('a repository, a line at a time: a file that fails on the way is the last line, and nothing is heard of after it', async (t) => {
+test('a repository, a line at a time: a file error keeps the other skills and is in the final result', async (t) => {
   const failing = `https://raw.githubusercontent.com/acme/tools/${COMMIT}/.github/skills/review/SKILL.md`;
   const server = await holding([], { [failing]: { status: 500, body: 'oops' } });
   t.after(server.close);
@@ -319,7 +335,10 @@ test('a repository, a line at a time: a file that fails on the way is the last l
   assert.equal(status, 200);
   const messages = text.trimEnd().split('\n').map((line) => JSON.parse(line));
   assert.equal(messages[0].type, 'opened');
-  assert.deepEqual(messages.at(-1), { type: 'error', error: `GitHub answered 500 for ${failing}` });
+  const last = messages.at(-1);
+  assert.equal(last.type, 'done');
+  assert.equal(last.scan.error, `GitHub answered 500 for ${failing}`);
+  assert.deepEqual(last.scan.skills.map((skill: { name: string }) => skill.name), ['broken', 'deploy', 'review']);
   assert.ok(messages.slice(1, -1).every((message) => message.type === 'skill'));
 });
 
@@ -531,6 +550,48 @@ test('the page: an error under the input, and the catalog as it was', async () =
   }
   await p.scan('github.com/acme/other');
   assert.equal(p.$('#scan-error')?.hidden, true);
+});
+
+test('the page: a scan that stopped partway adds the skills read before it, with the error', async () => {
+  const p = await page();
+  await p.scan('github.com/acme/flaky');
+  assert.equal(p.$('#scan-error')?.hidden, true);
+  assert.deepEqual(p.texts('.card-title'), ['alpha']);
+  assert.equal(
+    p.text('[data-repository="acme/flaky"] .alert-error'),
+    `Scan incomplete: GitHub answered 500 for https://raw.githubusercontent.com/acme/flaky/${FLAKY}/skills/beta/SKILL.md. These are the skills read before it; scan again for the rest.`,
+  );
+  assert.deepEqual(p.params(), ['https://github.com/acme/flaky']);
+});
+
+test('the page: a repository already in the catalog keeps its skills when a new scan of it stops partway', async () => {
+  // The first scan is complete; GitHub fails on the second.
+  let failing = false;
+  const failed: Recording = { ...RECORDING, [`https://raw.githubusercontent.com/acme/tools/${COMMIT}/skills/deploy/SKILL.md`]: { status: 500, body: 'oops' } };
+  const flaky = createWebServer({
+    open: (url) => openGitHub(url, { fetch: replay(failing ? failed : RECORDING) }),
+    openOwner: (url) => openGitHubOwner(url, { fetch: replay(RECORDING) }),
+    rules: DEFAULTS,
+    note: () => {},
+  });
+  const address = await listen(flaky, 0);
+  try {
+    const p = await page('', address);
+    await p.scan('github.com/acme/tools');
+    assert.deepEqual(p.texts('.card-title'), ['broken', 'deploy', 'review']);
+    failing = true;
+    await p.scan('https://github.com/acme/tools');
+    assert.equal(p.$('#scan-error')?.hidden, false);
+    assert.equal(
+      p.text('#scan-error'),
+      `Scan incomplete: GitHub answered 500 for https://raw.githubusercontent.com/acme/tools/${COMMIT}/skills/deploy/SKILL.md; acme/tools is left as it was`,
+    );
+    assert.deepEqual(p.texts('.card-title'), ['broken', 'deploy', 'review']);
+    assert.equal(p.all('.repository .alert-error').length, 0);
+    assert.deepEqual(p.params(), ['https://github.com/acme/tools']);
+  } finally {
+    flaky.close();
+  }
 });
 
 test('the page: a card opens its skill, with everything the SKILL.md says; Back returns to the catalog', async () => {
@@ -799,7 +860,7 @@ test('the page: a repository\'s skills show up as each is read; the page is all 
   assert.equal(p.text(`${tools} .alert-warn summary`), '1 warning');
 });
 
-test('the page: an organization\'s repository shows up as its skills are read; one that fails on the way is taken out again, a warning', async (t) => {
+test('the page: an organization\'s repository keeps its readable skills when one file fails', async (t) => {
   const held = `https://raw.githubusercontent.com/acme/tools/${COMMIT}/.github/skills/review/SKILL.md`;
   const server = await holding([held], { [held]: { status: 500, body: 'oops' } });
   t.after(server.close);
@@ -815,9 +876,12 @@ test('the page: an organization\'s repository shows up as its skills are read; o
   server.release(held);
   await until(() => !p.$('[aria-busy]'));
   assert.equal(p.text('#scan-error'), '');
-  assert.deepEqual(p.texts('[data-organization="acme"] .repository .repository-name'), ['acme/other']);
-  assert.equal(p.text('[data-organization="acme"] .organization-head .badge'), '1 skill in 1 of 4 repositories');
-  assert.ok(p.texts('[data-organization="acme"] > .alert-warn li').includes(`acme/tools: GitHub answered 500 for ${held}; skipped`));
+  assert.deepEqual(p.texts('[data-organization="acme"] .repository .repository-name'), ['acme/other', 'acme/tools']);
+  assert.equal(p.text('[data-organization="acme"] .organization-head .badge'), '4 skills in 2 of 4 repositories');
+  assert.equal(
+    p.text(`${tools} .alert-error`),
+    `Scan incomplete: GitHub answered 500 for ${held}. These are the skills read before it; scan again for the rest.`,
+  );
 });
 
 test('the page: an entry removed while it is being scanned is gone, its scan with it', async (t) => {

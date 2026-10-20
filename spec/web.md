@@ -26,19 +26,22 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
   repository's warnings come at the end.
 - An organization's repositories are added the same way, each as soon as its first skill is read:
   kept in the organization's order whichever finishes first, its totals counting what is in so far, with
-  `scanned N of M` while it goes on. Its warnings come at the end. A repository of it that fails on
-  the way is taken out again and becomes one of its warnings, as in the CLI.
+  `scanned N of M` while it goes on. Its warnings come at the end. A repository that cannot be opened
+  is skipped with a warning; one that stops partway keeps its partial result and error.
 - **The page is all there while scans go on**: *Scan* takes more URLs (one being scanned already is
   not scanned twice), the filter works, cards open, *Back* returns, and *Remove* takes an entry out
   and stops its scan. A skill open in the address shows as soon as it is in. An entry is in the
   address as soon as it shows, so a card opened while the scan goes on can be reloaded or shared.
   When the catalog is drawn again, open warnings stay open and the focused card keeps the focus.
   When a scan finishes, an open skill gets its copies and stays scrolled where it was.
-- If a scan stops on the way (rate limit, a rejected token, no network: it stops the CLI's too;
-  for a repository, also any file that cannot be read), what it added is taken out again: the error
-  is shown under the input, the catalog as it was.
 - Warnings are shown with their repository, or their organization; an error (not found, rate limit,
   not a URL) is shown under the input, and the catalog is left as it was.
+- A scan that stopped partway ([analysis](analysis.md#details)) keeps the skills and warnings read
+  before the error. A new repository shows those skills and `Scan incomplete: <message>` with them.
+  An existing repository keeps its earlier skills; the error is shown under the input,
+  `Scan incomplete: <message>; <owner>/<repo> is left as it was`.
+- If an organization repository stops partway, its skills read before the error stay in that
+  repository with `Scan incomplete: <message>`; the other repositories continue as usual.
 
 ## A skill
 
@@ -62,7 +65,8 @@ each card opens its own. A bare `#<skill id>` opens its first copy in the catalo
 ## API
 
 `GET /api/scan?url=<GitHub URL>` →
-`200 { source, ref, repository, skills: [{ id, name, description, summary, path, link, commit, copies, properties, html }], warnings }`.
+`200 { source, ref, repository, skills: [{ id, name, description, summary, path, link, commit, copies, properties, html }], warnings, error? }`;
+`error` only when the scan stopped partway: the skills are those read before it.
 `source` is `https://github.com/<owner>/<repo>[/tree/<ref>]`, whatever way the URL was written: the
 same `source` is the same repository in the catalog. `summary` is the description's first sentence;
 `html`, the body, made safe as above.
@@ -81,8 +85,10 @@ object on each.
   ones and `repository` its answer as above, left out if it has no skills or failed (its skills
   heard of before are not in it); then `{ type: "done", warnings }`.
 
-A failure after the first line is the last line, `{ type: "error", error }`, with the CLI's message;
-before it, the status and body are as without the header.
+A failure that can be kept as a partial scan is returned in the usual result: its `error` is the
+first failure, and its skills are the ones read before it. A failure that stops the whole scan is
+the last line, `{ type: "error", error }`, with the CLI's message; before it, the status and body
+are as without the header.
 A page that goes away before its answer is done (*Remove* on an entry being scanned, a closed tab)
 stops the scan on the server too: nothing more is asked of GitHub for it, the requests under way are
 cancelled, and no repository of an organization still waiting its turn is opened.

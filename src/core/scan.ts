@@ -1,4 +1,5 @@
-import { compare, findSkills } from './find.ts';
+import { AtlasError } from './errors.ts';
+import { compare, findSkills, type Candidate } from './find.ts';
 import { sortSkills, type Repository, type Skill } from './model.ts';
 import { parseSkill } from './parse.ts';
 import type { Rules } from './rules.ts';
@@ -12,43 +13,49 @@ export type Source = {
   links: string[];
   /** What listing the files had to leave out. */
   warnings: string[];
+  /** What stopped the listing before it ended; the files listed before it are still scanned. */
+  error?: string;
   /** The file's bytes, or undefined if it is not there. */
   read(path: string): Promise<Uint8Array | undefined>;
   /** A symbolic link's target, as the link says it, or undefined if it is not there. */
   readLink(path: string): Promise<string | undefined>;
 };
 
-export type ScanResult = { repository: Repository; skills: Skill[]; warnings: string[] };
+export type ScanResult = {
+  repository: Repository;
+  skills: Skill[];
+  warnings: string[];
+  /** What stopped the scan before it ended: the skills and warnings are those found before it. */
+  error?: string;
+};
 
 /**
  * fetch → find (rules) → parse. Nothing is stored: the result is all there is.
  * `found` hears of each skill as soon as it is certain, before the scan is done: its id, name and
- * main path are the result's, its copies those read so far. Not after the scan fails.
+ * main path are the result's, its copies those read so far. A failure once the repository is open
+ * does not lose what was read: it is the result's `error`.
  */
 export async function scan(source: Source, rules: Rules, found?: (skill: Skill) => void): Promise<ScanResult> {
   // Everything is read at the same time: on GitHub, each one is a request.
+  const links = await readAll(source.links, source.readLink);
   const targets = new Map<string, string>();
-  await Promise.all(
-    source.links.map(async (link) => {
-      const target = await source.readLink(link);
-      if (target !== undefined) targets.set(link, target);
-    }),
-  );
+  for (const [link, target] of links.read) if (target !== undefined) targets.set(link, target);
   const listed = findSkills(source.paths, targets, rules);
   // Identical SKILL.md files are one skill, at the first of their paths in this order: a skill is
   // certain once its path and every path before it are read.
   const candidates = [...listed.candidates].sort((a, b) => byMainPath(a.path, b.path));
   const files = [...new Set(candidates.map((candidate) => candidate.file))];
   const texts = new Map<string, string | undefined>();
+  const fileErrors = new Map<string, string>();
   const byText = new Map<string, Skill>();
   const skills: Skill[] = [];
   const parseWarnings: string[] = [];
   let next = 0;
-  let failed = false;
   const advance = () => {
-    for (; !failed && next < candidates.length && texts.has(candidates[next].file); next++) {
+    for (; next < candidates.length && texts.has(candidates[next].file); next++) {
       const { path, file } = candidates[next];
       const text = texts.get(file);
+      // A missing file or an unreadable one is left out. The latter still determines `error` below.
       if (text === undefined) continue;
       const known = byText.get(text);
       if (known) {
@@ -78,20 +85,46 @@ export async function scan(source: Source, rules: Rules, found?: (skill: Skill) 
       try {
         texts.set(file, normalize(await source.read(file)));
       } catch (error) {
-        failed = true; // the rest is not heard of
-        throw error;
+        if (!(error instanceof AtlasError)) throw error;
+        texts.set(file, undefined);
+        fileErrors.set(file, error.message);
       }
       advance();
     }),
   );
 
+  const [firstFailedFile] = [...fileErrors.keys()].sort(compare);
+  const error = source.error ?? links.error ?? (firstFailedFile === undefined ? undefined : fileErrors.get(firstFailedFile));
   const warnings = [...source.warnings, ...listed.warnings];
   for (const file of files.sort(compare)) {
-    if (texts.get(file) === undefined) warnings.push(`${file}: listed, but not found at the scanned commit; skipped`);
+    if (texts.has(file) && texts.get(file) === undefined && !fileErrors.has(file)) {
+      warnings.push(`${file}: listed, but not found at the scanned commit; skipped`);
+    }
   }
   warnings.push(...parseWarnings.sort(compare));
   if (rules.warnings.sameName) warnings.push(...sameNames(skills));
-  return { repository: source.repository, skills: sortSkills(skills), warnings };
+  return { repository: source.repository, skills: sortSkills(skills), warnings, ...(error === undefined ? {} : { error }) };
+}
+
+/**
+ * Reads every path at the same time. A path whose read fails is left out of `read`; the first
+ * failure, in path order, is the `error`. Only a failure explained to the user is caught.
+ */
+async function readAll<T>(paths: string[], read: (path: string) => Promise<T>): Promise<{ read: Map<string, T>; error?: string }> {
+  const results = new Map<string, T>();
+  const failures = new Map<string, string>();
+  await Promise.all(
+    paths.map(async (path) => {
+      try {
+        results.set(path, await read(path));
+      } catch (error) {
+        if (!(error instanceof AtlasError)) throw error;
+        failures.set(path, error.message);
+      }
+    }),
+  );
+  const [first] = [...failures.keys()].sort(compare);
+  return { read: results, error: first === undefined ? undefined : failures.get(first) };
 }
 
 /** Without a UTF-8 BOM, and with LF line endings: what makes two copies identical. */

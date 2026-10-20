@@ -74,8 +74,15 @@ async function openRepository(
   if (github.token && !ref && !tree) {
     // Code search finds files, not symbolic links: those come from the folders a skill can be in.
     // Not the whole tree: on a large repository it alone takes seconds.
-    const files = searched ?? (await searchPaths(github, id));
-    listing = { files, links: (await listFolders(github, id, sha, skillFolders(files))).links, truncated: false };
+    if (searched !== undefined) {
+      const folders = await listFolders(github, id, sha, skillFolders(searched));
+      listing = { files: searched, links: folders.links, truncated: false, error: folders.error };
+    } else {
+      const search = await searchPaths(github, id);
+      // After a failed search, a link could point at a file it did not reach: no links, and no false warnings.
+      const folders = search.error === undefined ? await listFolders(github, id, sha, skillFolders(search.files)) : { files: [], links: [] };
+      listing = { files: search.files, links: folders.links, truncated: false, error: search.error ?? folders.error };
+    }
   } else {
     listing = await listTree(github, id, sha);
     if (listing.truncated) {
@@ -88,6 +95,7 @@ async function openRepository(
     paths: listing.files,
     links: listing.links,
     warnings,
+    ...(listing.error === undefined ? {} : { error: listing.error }),
     read: (path) => github.raw(`${RAW}/${id}/${sha}/${encodePath(path)}`),
     // A symbolic link's content is its target.
     readLink: async (path) => {
@@ -161,42 +169,69 @@ function compareNames(a: string, b: string): number {
   return compare(a.toLowerCase(), b.toLowerCase()) || compare(a, b);
 }
 
-/** Code search looks at the whole default branch, 100 results a page. */
-async function searchPaths(github: Client, id: string): Promise<string[]> {
+/** Code search looks at the whole default branch, 100 results a page; a failed page keeps the pages before it. */
+async function searchPaths(github: Client, id: string): Promise<{ files: string[]; error?: string }> {
   const paths = new Set<string>(); // pages can repeat a result
   // GitHub returns at most 1000 results: ten pages.
   for (let page = 1; page <= 10; page++) {
-    const result = await github.json<{ total_count: number; items: { path: string }[] }>(
-      `${API}/search/code?q=filename:SKILL.md+repo:${id}&per_page=100&page=${page}`,
-    );
+    let result: { total_count: number; items: { path: string }[] };
+    try {
+      result = await github.json(`${API}/search/code?q=filename:SKILL.md+repo:${id}&per_page=100&page=${page}`);
+    } catch (error) {
+      return { files: [...paths], error: explained(error) };
+    }
     for (const item of result.items) paths.add(item.path);
     if (result.items.length < 100 || page * 100 >= result.total_count) break;
   }
-  return [...paths];
+  return { files: [...paths] };
 }
 
 type Tree = { truncated: boolean; tree: { path: string; mode: string; type: string; sha: string }[] };
 
-type Listing = { files: string[]; links: string[]; truncated: boolean };
+/** `error`: what stopped the listing before it ended. */
+type Listing = { files: string[]; links: string[]; truncated: boolean; error?: string };
 
 /** The whole tree at once, or only the skill roots when it is too large for one answer. */
 async function listTree(github: Client, id: string, sha: string): Promise<Listing> {
-  const tree = await github.json<Tree>(`${API}/repos/${id}/git/trees/${sha}?recursive=1`);
+  let tree: Tree;
+  try {
+    tree = await github.json<Tree>(`${API}/repos/${id}/git/trees/${sha}?recursive=1`);
+  } catch (error) {
+    return { files: [], links: [], truncated: false, error: explained(error) };
+  }
   if (!tree.truncated) return { ...entries(tree, ''), truncated: false };
   return { ...(await listFolders(github, id, sha, SKILL_ROOTS)), truncated: true };
 }
 
-/** The files and links in these folders, all of them at the same time; a missing folder adds nothing. */
+/**
+ * The files and links in these folders, all of them at the same time; a missing folder adds nothing.
+ * A folder that fails adds nothing either: the first one that does, in the given order, is the `error`.
+ */
 async function listFolders(github: Client, id: string, sha: string, folders: string[]): Promise<Omit<Listing, 'truncated'>> {
   const found = await Promise.all(
     folders.map(async (folder) => {
-      const found = await directory(github, id, sha, folder);
-      if (!found) return { files: [], links: [] };
-      if ('link' in found) return { files: [], links: [found.link] };
-      return entries(await github.json<Tree>(`${API}/repos/${id}/git/trees/${found.sha}?recursive=1`), `${folder}/`);
+      try {
+        const found = await directory(github, id, sha, folder);
+        if (!found) return { files: [], links: [] };
+        if ('link' in found) return { files: [], links: [found.link] };
+        return entries(await github.json<Tree>(`${API}/repos/${id}/git/trees/${found.sha}?recursive=1`), `${folder}/`);
+      } catch (error) {
+        return { files: [], links: [], error: explained(error) };
+      }
     }),
   );
-  return { files: found.flatMap((item) => item.files), links: [...new Set(found.flatMap((item) => item.links))] };
+  const error = found.find((item) => 'error' in item)?.error;
+  return {
+    files: found.flatMap((item) => item.files),
+    links: [...new Set(found.flatMap((item) => item.links))],
+    ...(error === undefined ? {} : { error }),
+  };
+}
+
+/** A failure explained to the user, as its message; anything else is a bug, and goes on up. */
+function explained(error: unknown): string {
+  if (!(error instanceof AtlasError)) throw error;
+  return error.message;
 }
 
 /** SKILL_ROOTS, and each outermost `skills` folder a found SKILL.md is in: where a link to a skill can be. */
@@ -255,9 +290,18 @@ function client({ fetch, token, signal }: GitHubOptions) {
     }
   }
 
+  /** An answer's body: fetch resolves once the headers are in, and the connection can still drop after. */
+  async function content<T>(url: string, read: () => Promise<T>): Promise<T> {
+    try {
+      return await read();
+    } catch (error) {
+      throw new AtlasError(`Cannot read GitHub's answer for ${url}: ${describe(error)}`);
+    }
+  }
+
   async function request(url: string, notFound: string): Promise<unknown> {
     const response = await get(url, { headers });
-    if (response.ok) return response.json();
+    if (response.ok) return content(url, () => response.json());
     const body: unknown = await response.json().catch(() => undefined);
     const message = (body as { message?: unknown } | undefined)?.message;
     const text = typeof message === 'string' ? message : '';
@@ -283,7 +327,7 @@ function client({ fetch, token, signal }: GitHubOptions) {
       const response = await get(url);
       if (response.status === 404) return undefined;
       if (!response.ok) throw new AtlasError(`GitHub answered ${response.status} for ${url}`);
-      return new Uint8Array(await response.arrayBuffer());
+      return new Uint8Array(await content(url, () => response.arrayBuffer()));
     },
   };
 }
