@@ -5,15 +5,18 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import { firstSentence, type RulesStore } from '../commands.ts';
 import { AtlasError } from '../core/errors.ts';
-import { parseGitHubUrl } from '../core/github.ts';
+import { parseGitHubOwnerUrl, parseGitHubUrl } from '../core/github.ts';
 import { skillLink } from '../core/model.ts';
+import { scanOrganization, type Organization } from '../core/organization.ts';
 import { parseRules } from '../core/rules.ts';
-import { scan, type Source } from '../core/scan.ts';
+import { scan, type ScanResult, type Source } from '../core/scan.ts';
 import { renderBody } from './render.ts';
 
 export type WebOptions = {
   /** Opens a GitHub repository URL. */
   open(url: string): Promise<Source>;
+  /** Opens a GitHub organization's (or user's) URL: every repository it has. */
+  openOwner(url: string): Promise<Organization>;
   rules: RulesStore;
   /** Where the rules file's notes go: the server's stderr. */
   note(text: string): void;
@@ -66,33 +69,47 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
   response.end(await readFile(new URL(asset.file, PUBLIC)));
 }
 
-async function scanRequest(input: string, response: ServerResponse, { open, rules, note }: WebOptions) {
+async function scanRequest(input: string, response: ServerResponse, { open, openOwner, rules, note }: WebOptions) {
   const name = parseGitHubUrl(input);
-  if (!input.trim()) return send(response, 400, { error: 'Paste a GitHub repository URL' });
-  if (!name) return send(response, 400, { error: `Not a GitHub repository URL: ${input.trim()}` });
+  const owner = name ? undefined : parseGitHubOwnerUrl(input);
+  if (!input.trim()) return send(response, 400, { error: 'Paste a GitHub repository or organization URL' });
+  if (!name && !owner) return send(response, 400, { error: `Not a GitHub repository or organization URL: ${input.trim()}` });
   try {
     // The rules first, as in the CLI: a broken rules file stops the scan before anything is fetched.
     const file = await rules.load(undefined, note);
     const parsed = parseRules(file.text, file.path);
-    const result = await scan(await open(input), parsed);
-    const { repository } = result;
+    if (name) return send(response, 200, repositoryAnswer(await scan(await open(input), parsed), name.ref ?? ''));
+    const result = await scanOrganization(await openOwner(input), parsed);
     send(response, 200, {
-      // What makes two scans the same repository: a new scan of it replaces the old one.
-      source: `https://github.com/${repository.id}${name.ref ? `/tree/${name.ref}` : ''}`,
-      ref: name.ref ?? '',
-      repository,
-      skills: result.skills.map(({ body, ...skill }) => {
-        const link = skillLink(repository, { ...skill, body });
-        const raw = link.replace(`${repository.url}/blob/`, `https://raw.githubusercontent.com/${repository.id}/`);
-        const root = { page: `${repository.url}/blob/${repository.commit}/`, raw: `https://raw.githubusercontent.com/${repository.id}/${repository.commit}/` };
-        return { ...skill, summary: firstSentence(skill.description), link, html: renderBody(body, { page: link, raw }, root) };
-      }),
+      // An organization is one entry in the catalog, like a repository: the same source replaces it.
+      source: result.owner.url,
+      owner: result.owner,
+      listed: result.listed,
+      repositories: result.repositories.map((repository) => repositoryAnswer(repository, '')),
       warnings: result.warnings,
     });
   } catch (error) {
     if (!(error instanceof AtlasError)) throw error;
     send(response, 422, { error: error.message });
   }
+}
+
+/** One repository's scan, as the page shows it: each skill with its link, its summary and its body made safe. */
+function repositoryAnswer(result: ScanResult, ref: string) {
+  const { repository } = result;
+  return {
+    // What makes two scans the same repository: a new scan of it replaces the old one.
+    source: `https://github.com/${repository.id}${ref ? `/tree/${ref}` : ''}`,
+    ref,
+    repository,
+    skills: result.skills.map(({ body, ...skill }) => {
+      const link = skillLink(repository, { ...skill, body });
+      const raw = link.replace(`${repository.url}/blob/`, `https://raw.githubusercontent.com/${repository.id}/`);
+      const root = { page: `${repository.url}/blob/${repository.commit}/`, raw: `https://raw.githubusercontent.com/${repository.id}/${repository.commit}/` };
+      return { ...skill, summary: firstSentence(skill.description), link, html: renderBody(body, { page: link, raw }, root) };
+    }),
+    warnings: result.warnings,
+  };
 }
 
 function send(response: ServerResponse, status: number, body: unknown) {

@@ -2,6 +2,7 @@
 // terminal: everything that differs between them comes in through the context.
 import { AtlasError } from './core/errors.ts';
 import { skillLink, type Repository, type Skill } from './core/model.ts';
+import { scanOrganization, type Organization, type OrganizationResult } from './core/organization.ts';
 import { DEFAULT_RULES, parseRules } from './core/rules.ts';
 import { scan, type Source } from './core/scan.ts';
 
@@ -14,8 +15,8 @@ export type RulesStore = {
 };
 
 export type Context = {
-  /** Opens what the user asked to scan. */
-  open(input: string): Promise<Source>;
+  /** Opens what the user asked to scan: a repository, or an organization's repositories. */
+  open(input: string): Promise<Source | Organization>;
   print(text: string): void;
   /** Errors and warnings. */
   error(text: string): void;
@@ -26,7 +27,7 @@ export type Context = {
 
 const usage = `Usage: skill-atlas <command>
 
-  scan [--rules <file>] <GitHub URL | directory>   find every skill in a repository and print it
+  scan [--rules <file>] <GitHub URL | directory>   find every skill in a repository, or in all of an organization's, and print it
   rules [--defaults]                               show the rules file: what is a skill, and what is not
   serve [--port <n>]                               open the catalog in a browser, at http://localhost:4173/
   help                                             show this help`;
@@ -61,7 +62,9 @@ async function scanCommand(args: string[], context: Context) {
   // The rules first: a broken rules file stops the scan before anything is fetched.
   const file = await context.rules.load(explicit, context.error);
   const rules = parseRules(file.text, file.path);
-  const result = await scan(await context.open(inputs[0]), rules);
+  const opened = await context.open(inputs[0]);
+  if ('repositories' in opened) return printOrganization(await scanOrganization(opened, rules), context);
+  const result = await scan(opened, rules);
   printRepository(result.repository, result.skills, context);
   for (const warning of result.warnings) context.error(`warning: ${warning}`);
 }
@@ -93,6 +96,23 @@ function printRepository(repository: Repository, skills: Skill[], { print }: Con
     print(`  ${skillLink(repository, skill)}`);
     if (skill.copies.length > 0) print(`  also in ${skill.copies.join(', ')}`);
   }
+}
+
+/** `<owner> · N skills in M of K repositories`, then each repository with skills, as for one. */
+function printOrganization(result: OrganizationResult, context: Context) {
+  const skills = result.repositories.reduce((sum, repository) => sum + repository.skills.length, 0);
+  context.print(`${result.owner.id} · ${organizationSummary(skills, result.repositories.length, result.listed)}`);
+  for (const { repository, skills } of result.repositories) {
+    context.print('');
+    printRepository(repository, skills, context);
+  }
+  for (const { repository, warnings } of result.repositories) for (const warning of warnings) context.error(`warning: ${repository.id}: ${warning}`);
+  for (const warning of result.warnings) context.error(`warning: ${warning}`);
+}
+
+/** `N skills in M of K repositories`: the CLI's and the page's. */
+export function organizationSummary(skills: number, withSkills: number, listed: number): string {
+  return `${skills} ${skills === 1 ? 'skill' : 'skills'} in ${withSkills} of ${listed} ${listed === 1 ? 'repository' : 'repositories'}`;
 }
 
 export function firstSentence(text: string): string {

@@ -2,7 +2,7 @@
 // token. No Node APIs here.
 import { run, type RulesStore } from './commands.ts';
 import { AtlasError } from './core/errors.ts';
-import { openGitHub, type Fetch } from './core/github.ts';
+import { openGitHub, openGitHubOwner, parseGitHubOwnerUrl, type Fetch } from './core/github.ts';
 import { DEFAULT_RULES } from './core/rules.ts';
 
 /** No file in the browser: the default rules, built in. */
@@ -21,7 +21,8 @@ export type BrowserOptions = {
 
 export function createBrowserBackend(options: BrowserOptions = {}) {
   const live = options.fetch ?? ((url, init) => fetch(url, init));
-  const open = (input: string) => openGitHub(input, { fetch: live });
+  const open = (input: string) =>
+    parseGitHubOwnerUrl(input) ? openGitHubOwner(input, { fetch: live }) : openGitHub(input, { fetch: live });
 
   return {
     /** Runs a typed command line, such as `skill-atlas scan <URL>`, and returns what it printed. */

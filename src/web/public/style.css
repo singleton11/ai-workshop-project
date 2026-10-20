@@ -138,6 +138,10 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .repository-name a { color: var(--text); text-decoration: none; }
 .repository-name a:hover { color: var(--accent); }
 .repository-head .button-ghost { margin-left: auto; }
+.organization { margin-bottom: var(--space-6); }
+.organization-head { padding-bottom: var(--space-3); border-bottom: 1px solid var(--border); margin-bottom: var(--space-5); }
+.organization-name { font-size: 20px; }
+.organization .repository { margin-left: var(--space-4); }
 
 .badge {
   display: inline-block;

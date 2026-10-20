@@ -12,16 +12,16 @@
     <a class="brand" href="./" data-home>
       <span class="brand-mark" aria-hidden="true">◆</span> Skill Atlas
     </a>
-    <span class="topbar-note">Every agent skill in a repository</span>
+    <span class="topbar-note">Every agent skill in a repository or an organization</span>
   </header>
 
   <main class="page">
     <section id="catalog-view">
       <form id="scan-form" class="scan" autocomplete="off">
-        <label class="scan-label" for="scan-url">GitHub repository</label>
+        <label class="scan-label" for="scan-url">GitHub repository or organization</label>
         <div class="scan-row">
           <input id="scan-url" name="url" class="input" type="text" inputmode="url" spellcheck="false"
-                 placeholder="https://github.com/owner/repo" required>
+                 placeholder="https://github.com/owner/repo or https://github.com/owner" required>
           <button id="scan-button" class="button button-primary" type="submit">Scan</button>
         </div>
         <p id="scan-error" class="alert alert-error" role="alert" hidden></p>
@@ -35,7 +35,7 @@
 
       <div id="empty" class="empty">
         <p class="empty-title">Your catalog is empty</p>
-        <p class="muted">Paste a repository link above: every <code>SKILL.md</code> in it lands here.</p>
+        <p class="muted">Paste a repository or organization link above: every <code>SKILL.md</code> in it lands here.</p>
       </div>
 
       <div id="repositories"></div>

@@ -7,7 +7,7 @@ import { createServer } from 'node:net';
 import { after, before, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { createBrowserBackend } from '../src/browser.ts';
-import { openGitHub } from '../src/core/github.ts';
+import { openGitHub, openGitHubOwner } from '../src/core/github.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { createWebServer, listen } from '../src/web/server.ts';
 import { atlas, CLI, DEFAULTS, FIXTURE } from './helpers.ts';
@@ -65,11 +65,27 @@ const RECORDING: Recording = {
   [`https://api.github.com/repos/acme/other/git/trees/${OTHER}?recursive=1`]: tree(['.claude/skills/triage/SKILL.md']),
   ...raw('acme/other', OTHER, '.claude/skills/triage/SKILL.md', '---\nname: triage\ndescription: Sort new issues.\n---\nSteps.\n'),
   'https://api.github.com/repos/acme/missing': { status: 404, body: { message: 'Not Found' } },
+  // acme, the organization: tools and other, a fork never opened, an empty one and one gone.
+  'https://api.github.com/users/acme': { status: 200, body: { login: 'acme', type: 'Organization' } },
+  'https://api.github.com/orgs/acme/repos?type=all&per_page=100&page=1': {
+    status: 200,
+    body: [
+      { full_name: 'acme/tools', default_branch: 'main', fork: false, archived: false },
+      { full_name: 'acme/fork', default_branch: 'main', fork: true, archived: false },
+      { full_name: 'acme/empty', default_branch: 'main', fork: false, archived: false },
+      { full_name: 'acme/other', default_branch: 'trunk', fork: false, archived: false },
+      { full_name: 'acme/lost', default_branch: 'main', fork: false, archived: false },
+    ],
+  },
+  'https://api.github.com/repos/acme/empty/commits/main': { status: 409, body: { message: 'Git Repository is empty.' } },
+  'https://api.github.com/repos/acme/lost/commits/main': { status: 404, body: { message: 'Not Found' } },
+  'https://api.github.com/users/nobody': { status: 404, body: { message: 'Not Found' } },
 };
 
 let base = '';
 const server = createWebServer({
   open: (url) => openGitHub(url, { fetch: replay(RECORDING) }),
+  openOwner: (url) => openGitHubOwner(url, { fetch: replay(RECORDING) }),
   rules: DEFAULTS,
   note: () => {},
 });
@@ -148,24 +164,40 @@ test('…/tree/<ref>: that ref, and a source of its own', async () => {
 });
 
 test('a missing or bad URL, or a local directory → 400; what the CLI explains → 422, with its message', async () => {
-  assert.deepEqual(await api(''), { status: 400, body: { error: 'Paste a GitHub repository URL' } });
-  assert.deepEqual(await api(FIXTURE), { status: 400, body: { error: `Not a GitHub repository URL: ${FIXTURE}` } });
-  assert.deepEqual(await api('https://gitlab.com/a/b'), { status: 400, body: { error: 'Not a GitHub repository URL: https://gitlab.com/a/b' } });
+  assert.deepEqual(await api(''), { status: 400, body: { error: 'Paste a GitHub repository or organization URL' } });
+  assert.deepEqual(await api(FIXTURE), { status: 400, body: { error: `Not a GitHub repository or organization URL: ${FIXTURE}` } });
+  assert.deepEqual(await api('https://gitlab.com/a/b'), { status: 400, body: { error: 'Not a GitHub repository or organization URL: https://gitlab.com/a/b' } });
   assert.deepEqual(await api('github.com/acme/missing'), { status: 422, body: { error: 'Repository not found: https://github.com/acme/missing' } });
+});
+
+test('GET /api/scan for an organization: its repositories with skills, each as for one, and the other warnings', async () => {
+  const { status, body } = await api('https://github.com/acme/');
+  assert.equal(status, 200);
+  assert.equal(body.source, 'https://github.com/acme');
+  assert.deepEqual(body.owner, { id: 'acme', url: 'https://github.com/acme' });
+  assert.equal(body.listed, 4);
+  assert.deepEqual(body.repositories.map((repository: { source: string }) => repository.source), ['https://github.com/acme/other', 'https://github.com/acme/tools']);
+  // The same answer as the repository on its own.
+  assert.deepEqual(body.repositories[1], (await api('https://github.com/acme/tools')).body);
+  assert.deepEqual(body.warnings, ['acme/lost: Not found in acme/lost: main; skipped']);
+  assert.deepEqual(await api('github.com/nobody'), { status: 422, body: { error: 'Organization or user not found: https://github.com/nobody' } });
 });
 
 test('a broken rules file → 422 and nothing is fetched', async (t) => {
   const fetched: string[] = [];
   const broken = createWebServer({
     open: (url) => openGitHub(url, { fetch: (url) => (fetched.push(url), replay(RECORDING)(url)) }),
+    openOwner: (url) => openGitHubOwner(url, { fetch: (url) => (fetched.push(url), replay(RECORDING)(url)) }),
     rules: { load: async () => ({ path: '/rules.yaml', text: 'version: 2\n' }), peek: async () => ({}) },
     note: () => {},
   });
   const address = await listen(broken, 0);
   t.after(() => broken.close());
-  const response = await fetch(`${address}api/scan?url=github.com/acme/tools`);
-  assert.equal(response.status, 422);
-  assert.match((await response.json()).error, /^\/rules\.yaml:1: /);
+  for (const url of ['github.com/acme/tools', 'github.com/acme']) {
+    const response = await fetch(`${address}api/scan?url=${url}`);
+    assert.equal(response.status, 422);
+    assert.match((await response.json()).error, /^\/rules\.yaml:1: /);
+  }
   assert.deepEqual(fetched, []);
 });
 
@@ -309,7 +341,7 @@ test('the page: an error under the input, and the catalog as it was', async () =
   await p.scan('github.com/acme/tools');
   for (const [url, message] of [
     ['github.com/acme/missing', 'Repository not found: https://github.com/acme/missing'],
-    ['./fixture', 'Not a GitHub repository URL: ./fixture'],
+    ['./fixture', 'Not a GitHub repository or organization URL: ./fixture'],
   ]) {
     await p.scan(url);
     assert.equal(p.$('#scan-error')?.hidden, false);
@@ -359,4 +391,61 @@ test('the page: nothing is stored; a reload of the address scans again and opens
   const unknown = await page(`?repo=github.com/acme/other#${encodeURIComponent('acme/other:nope')}`);
   await until(() => unknown.text('#skill-view .empty-title') !== '');
   assert.equal(unknown.text('#skill-view .empty-title'), 'acme/other:nope is not in the catalog');
+});
+
+test('the page: an organization is one entry, its repositories with skills inside it', async () => {
+  const p = await page();
+  await p.scan('github.com/acme');
+  assert.equal(p.text('.organization-name'), 'acme');
+  assert.equal(p.text('[data-organization="acme"] .organization-head .badge'), '4 skills in 2 of 4 repositories');
+  assert.deepEqual(p.texts('[data-organization="acme"] .repository .repository-name'), ['acme/other', 'acme/tools']);
+  assert.deepEqual(p.texts('[data-repository="acme/tools"] .card-title'), ['broken', 'deploy', 'review']);
+  assert.equal(p.text('#count'), '4 skills');
+  assert.deepEqual(p.params(), ['https://github.com/acme']);
+  // The organization's warnings, and each repository's with it.
+  assert.equal(p.text('[data-organization="acme"] > .alert-warn li'), 'acme/lost: Not found in acme/lost: main; skipped');
+  assert.equal(p.text('[data-repository="acme/tools"] .alert-warn summary'), '1 warning');
+  // Removed as a whole only.
+  assert.equal(p.all('[data-organization="acme"] .button-ghost').length, 1);
+
+  p.filter('triage');
+  assert.deepEqual(p.texts('.card-title'), ['triage']);
+  assert.equal(p.text('#count'), '1 of 4 skills');
+  p.filter('');
+});
+
+test('the page: the organization again replaces it; one of its repositories is an entry of its own; it is removed as a whole', async () => {
+  const p = await page();
+  await p.scan('github.com/acme');
+  await p.scan('https://github.com/acme/');
+  assert.deepEqual(p.texts('.organization-name'), ['acme']);
+  await p.scan('github.com/acme/tools');
+  assert.deepEqual(p.params(), ['https://github.com/acme', 'https://github.com/acme/tools']);
+  assert.equal(p.text('#count'), '7 skills');
+
+  (p.$('[data-organization="acme"] .organization-head .button-ghost') as HTMLButtonElement).click();
+  assert.deepEqual(p.texts('.organization-name'), []);
+  assert.deepEqual(p.texts('.repository-name'), ['acme/tools']);
+  assert.deepEqual(p.params(), ['https://github.com/acme/tools']);
+});
+
+test('the page: a skill of an organization opens, and a reload of its address scans the organization again', async () => {
+  const id = encodeURIComponent('acme/other:.claude/skills/triage/SKILL.md');
+  const p = await page(`?repo=${encodeURIComponent('https://github.com/acme')}#${id}`);
+  await until(() => p.text('#skill-view h1') === 'triage');
+  const meta = Object.fromEntries(p.all('.meta dt').map((dt) => [dt.textContent, dt.nextElementSibling?.textContent?.trim()]));
+  assert.equal(meta.Repository, 'acme/other');
+  assert.equal(p.$('#skill-view [data-link]')?.getAttribute('href'), `https://github.com/acme/other/blob/${OTHER}/.claude/skills/triage/SKILL.md`);
+  (p.$('#skill-view .back') as HTMLButtonElement).click();
+  await until(() => p.$('#catalog-view')?.hidden === false && !p.$('[aria-busy]'));
+  assert.deepEqual(p.texts('[data-organization="acme"] .repository .repository-name'), ['acme/other', 'acme/tools']);
+});
+
+test('the page: an unknown organization is an error under the input, and the catalog as it was', async () => {
+  const p = await page();
+  await p.scan('github.com/acme/other');
+  await p.scan('https://github.com/nobody');
+  assert.equal(p.text('#scan-error'), 'Organization or user not found: https://github.com/nobody');
+  assert.deepEqual(p.texts('.repository-name'), ['acme/other']);
+  assert.deepEqual(p.params(), ['https://github.com/acme/other']);
 });

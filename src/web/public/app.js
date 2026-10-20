@@ -1,4 +1,5 @@
-// The catalog page: paste a GitHub URL, the skills fill the catalog; a card opens its skill.
+// The catalog page: paste a GitHub URL, of a repository or of an organization, the skills fill the
+// catalog; a card opens its skill.
 // Nothing is stored: the scanned URLs live in the address, `?repo=<url>`, the open skill in `#<id>`.
 // spec/web.md.
 
@@ -6,7 +7,9 @@
  *   commit: string, copies: string[], properties: Record<string, unknown>, html: string }} Skill */
 /** @typedef {{ source: string, ref: string, repository: { id: string, url: string, commit: string },
  *   skills: Skill[], warnings: string[] }} Scan */
-/** @typedef {{ key: string, scan?: Scan, loading: boolean }} Entry */
+/** @typedef {{ source: string, owner: { id: string, url: string }, listed: number, repositories: Scan[],
+ *   warnings: string[] }} OrganizationScan */
+/** @typedef {{ key: string, scan?: Scan | OrganizationScan, loading: boolean }} Entry */
 
 const $ = (id) => document.getElementById(id);
 
@@ -94,10 +97,18 @@ function openSkillId() {
   return location.hash.length > 1 ? decodeURIComponent(location.hash.slice(1)) : '';
 }
 
+/** A repository's scan, or each of an organization's repositories. @returns {Scan[]} */
+function repositoriesOf(scan) {
+  if (!scan) return [];
+  return 'repositories' in scan ? scan.repositories : [scan];
+}
+
 function findSkill(id) {
   for (const entry of entries) {
-    const skill = entry.scan?.skills.find((skill) => skill.id === id);
-    if (skill) return { skill, scan: entry.scan };
+    for (const scan of repositoriesOf(entry.scan)) {
+      const skill = scan.skills.find((skill) => skill.id === id);
+      if (skill) return { skill, scan };
+    }
   }
   return undefined;
 }
@@ -118,40 +129,78 @@ function matches(skill) {
 }
 
 function renderCatalog() {
-  const scanned = entries.filter((entry) => entry.scan);
-  const total = scanned.reduce((sum, entry) => sum + entry.scan.skills.length, 0);
-  const shown = scanned.reduce((sum, entry) => sum + entry.scan.skills.filter(matches).length, 0);
+  const scans = entries.flatMap((entry) => repositoriesOf(entry.scan));
+  const total = scans.reduce((sum, scan) => sum + scan.skills.length, 0);
+  const shown = scans.reduce((sum, scan) => sum + scan.skills.filter(matches).length, 0);
   $('empty').hidden = entries.length > 0;
   $('toolbar').hidden = total === 0;
   $('count').textContent = filter ? `${shown} of ${total} skills` : `${total} ${total === 1 ? 'skill' : 'skills'}`;
-  $('repositories').replaceChildren(...entries.map(renderRepository));
+  $('repositories').replaceChildren(...entries.map(renderEntry));
 }
 
 /** @param {Entry} entry */
-function renderRepository(entry) {
+function renderEntry(entry) {
   const { scan } = entry;
   if (!scan) {
     return h('section', { class: 'repository', 'aria-busy': 'true' },
       h('div', { class: 'repository-head' }, h('h2', { class: 'repository-name' }, entry.key)),
       h('div', { class: 'grid' }, h('div', { class: 'card card-loading' }, h('span', {}, h('span', { class: 'spinner' }), ' Scanning…'))));
   }
+  if ('repositories' in scan) return renderOrganization(entry, scan);
+  return renderRepository(scan, entry);
+}
+
+/** An organization: its repositories with skills, each as a repository of its own, removed together. */
+function renderOrganization(entry, scan) {
+  const skills = scan.repositories.reduce((sum, repository) => sum + repository.skills.length, 0);
+  return h('section', { class: 'organization', 'data-organization': scan.owner.id, 'aria-busy': entry.loading ? 'true' : undefined },
+    h('div', { class: 'repository-head organization-head' },
+      h('h2', { class: 'repository-name organization-name' },
+        h('a', { href: scan.source, target: '_blank', rel: 'noopener noreferrer' }, scan.owner.id)),
+      h('span', { class: 'badge' }, organizationSummary(skills, scan.repositories.length, scan.listed)),
+      entry.loading && h('span', { class: 'spinner', 'aria-label': 'Scanning' }),
+      removeButton(entry, scan.owner.id)),
+    renderWarnings(scan.warnings),
+    scan.repositories.length > 0
+      ? scan.repositories.map((repository) => renderRepository(repository))
+      : h('p', { class: 'muted' }, 'No skills in its repositories.'));
+}
+
+/** `N skills in M of K repositories`, as the CLI says it. */
+function organizationSummary(skills, withSkills, listed) {
+  return `${skills} ${skills === 1 ? 'skill' : 'skills'} in ${withSkills} of ${listed} ${listed === 1 ? 'repository' : 'repositories'}`;
+}
+
+/**
+ * @param {Scan} scan
+ * @param {Entry} [entry] the catalog entry it is, to remove; none for an organization's repository
+ */
+function renderRepository(scan, entry) {
   const skills = scan.skills.filter(matches);
   const label = scan.skills.length === 1 ? '1 skill' : `${scan.skills.length} skills`;
-  return h('section', { class: 'repository', 'data-repository': scan.repository.id, 'aria-busy': entry.loading ? 'true' : undefined },
+  return h('section', { class: 'repository', 'data-repository': scan.repository.id, 'aria-busy': entry?.loading ? 'true' : undefined },
     h('div', { class: 'repository-head' },
       h('h2', { class: 'repository-name' },
         h('a', { href: scan.source, target: '_blank', rel: 'noopener noreferrer' }, scan.repository.id)),
       h('span', { class: 'badge' }, label),
       scan.ref && h('span', { class: 'badge badge-muted', title: 'ref' }, scan.ref),
       h('span', { class: 'badge badge-muted', title: scan.repository.commit }, scan.repository.commit.slice(0, 7)),
-      entry.loading && h('span', { class: 'spinner', 'aria-label': 'Scanning' }),
-      h('button', { class: 'button button-ghost', type: 'button', onclick: () => remove(entry), title: `Remove ${scan.repository.id}` }, 'Remove')),
-    scan.warnings.length > 0 && h('details', { class: 'alert alert-warn' },
-      h('summary', {}, scan.warnings.length === 1 ? '1 warning' : `${scan.warnings.length} warnings`),
-      h('ul', {}, scan.warnings.map((warning) => h('li', {}, warning)))),
+      entry?.loading && h('span', { class: 'spinner', 'aria-label': 'Scanning' }),
+      entry && removeButton(entry, scan.repository.id)),
+    renderWarnings(scan.warnings),
     skills.length > 0
       ? h('div', { class: 'grid' }, skills.map(renderCard))
       : h('p', { class: 'muted' }, scan.skills.length ? 'No skill matches the filter.' : 'No skills in this repository.'));
+}
+
+function removeButton(entry, name) {
+  return h('button', { class: 'button button-ghost', type: 'button', onclick: () => remove(entry), title: `Remove ${name}` }, 'Remove');
+}
+
+function renderWarnings(warnings) {
+  return warnings.length > 0 && h('details', { class: 'alert alert-warn' },
+    h('summary', {}, warnings.length === 1 ? '1 warning' : `${warnings.length} warnings`),
+    h('ul', {}, warnings.map((warning) => h('li', {}, warning))));
 }
 
 /** @param {Skill} skill */
