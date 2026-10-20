@@ -5,15 +5,18 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import { firstSentence, type RulesStore } from '../commands.ts';
 import { AtlasError } from '../core/errors.ts';
-import { parseGitHubUrl } from '../core/github.ts';
-import { skillLink } from '../core/model.ts';
-import { parseRules } from '../core/rules.ts';
-import { scan, type Source } from '../core/scan.ts';
+import { parseGitHubOwnerUrl, parseGitHubUrl } from '../core/github.ts';
+import { skillLink, type Repository, type Skill } from '../core/model.ts';
+import { scanOrganization, type Organization } from '../core/organization.ts';
+import { parseRules, type Rules } from '../core/rules.ts';
+import { scan, type ScanResult, type Source } from '../core/scan.ts';
 import { renderBody } from './render.ts';
 
 export type WebOptions = {
-  /** Opens a GitHub repository URL. */
-  open(url: string): Promise<Source>;
+  /** Opens a GitHub repository URL; once `signal` is aborted, no more is fetched for it. */
+  open(url: string, signal: AbortSignal): Promise<Source>;
+  /** Opens a GitHub organization's (or user's) URL: every repository it has. Once `signal` is aborted, no more is fetched for it. */
+  openOwner(url: string, signal: AbortSignal): Promise<Organization>;
   rules: RulesStore;
   /** Where the rules file's notes go: the server's stderr. */
   note(text: string): void;
@@ -59,42 +62,121 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
   if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(request.headers.host ?? '')) return send(response, 403, { error: 'Forbidden' });
   const url = new URL(request.url ?? '/', 'http://localhost');
   if (request.method !== 'GET' && request.method !== 'HEAD') return send(response, 405, { error: 'Method not allowed' });
-  if (url.pathname === '/api/scan') return scanRequest(url.searchParams.get('url') ?? '', response, options);
+  if (url.pathname === '/api/scan') {
+    const stream = /\bapplication\/x-ndjson\b/.test(request.headers.accept ?? '');
+    return scanRequest(url.searchParams.get('url') ?? '', stream, response, options);
+  }
   const asset = ASSETS[url.pathname];
   if (!asset) return send(response, 404, { error: `Not found: ${url.pathname}` });
   response.writeHead(200, { ...HEADERS, 'Content-Type': asset.type, 'Cache-Control': 'no-cache' });
   response.end(await readFile(new URL(asset.file, PUBLIC)));
 }
 
-async function scanRequest(input: string, response: ServerResponse, { open, rules, note }: WebOptions) {
+async function scanRequest(input: string, stream: boolean, response: ServerResponse, { open, openOwner, rules, note }: WebOptions) {
   const name = parseGitHubUrl(input);
-  if (!input.trim()) return send(response, 400, { error: 'Paste a GitHub repository URL' });
-  if (!name) return send(response, 400, { error: `Not a GitHub repository URL: ${input.trim()}` });
+  const owner = name ? undefined : parseGitHubOwnerUrl(input);
+  if (!input.trim()) return send(response, 400, { error: 'Paste a GitHub repository or organization URL' });
+  if (!name && !owner) return send(response, 400, { error: `Not a GitHub repository or organization URL: ${input.trim()}` });
+  // A page that goes away before its answer is done (a removed entry, a closed tab) stops its scan:
+  // nothing more is fetched from GitHub for it.
+  const gone = new AbortController();
+  response.once('close', () => {
+    if (!response.writableFinished) gone.abort();
+  });
   try {
     // The rules first, as in the CLI: a broken rules file stops the scan before anything is fetched.
     const file = await rules.load(undefined, note);
     const parsed = parseRules(file.text, file.path);
-    const result = await scan(await open(input), parsed);
-    const { repository } = result;
+    if (name && stream) return await streamRepository(await open(input, gone.signal), parsed, name.ref ?? '', response);
+    if (name) return send(response, 200, repositoryAnswer(await scan(await open(input, gone.signal), parsed), name.ref ?? ''));
+    const organization = await openOwner(input, gone.signal);
+    if (stream) return await streamOrganization(organization, parsed, response);
+    const result = await scanOrganization(organization, parsed);
     send(response, 200, {
-      // What makes two scans the same repository: a new scan of it replaces the old one.
-      source: `https://github.com/${repository.id}${name.ref ? `/tree/${name.ref}` : ''}`,
-      ref: name.ref ?? '',
-      repository,
-      skills: result.skills.map(({ body, ...skill }) => {
-        const link = skillLink(repository, { ...skill, body });
-        const raw = link.replace(`${repository.url}/blob/`, `https://raw.githubusercontent.com/${repository.id}/`);
-        const root = { page: `${repository.url}/blob/${repository.commit}/`, raw: `https://raw.githubusercontent.com/${repository.id}/${repository.commit}/` };
-        return { ...skill, summary: firstSentence(skill.description), link, html: renderBody(body, { page: link, raw }, root) };
-      }),
+      // An organization is one entry in the catalog, like a repository: the same source replaces it.
+      source: result.owner.url,
+      owner: result.owner,
+      listed: result.listed,
+      repositories: result.repositories.map((repository) => repositoryAnswer(repository, '')),
       warnings: result.warnings,
-      // The scan stopped before it ended: the skills are the ones read before it.
-      ...(result.error === undefined ? {} : { error: result.error }),
     });
   } catch (error) {
+    if (gone.signal.aborted) return void response.destroy(); // no one to answer
     if (!(error instanceof AtlasError)) throw error;
     send(response, 422, { error: error.message });
   }
+}
+
+/** The start of a line-at-a-time answer; once it is out, a failure can only be a line of its own. */
+function startLines(response: ServerResponse) {
+  response.writeHead(200, { ...HEADERS, 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' });
+  // A page that went away, or stopped listening, hears nothing more.
+  return (body: unknown) => {
+    if (!response.writableEnded && !response.destroyed) response.write(`${JSON.stringify(body)}\n`);
+  };
+}
+
+/**
+ * A repository, a line at a time, so the page shows each skill as soon as it is read: the
+ * repository first, then each skill, then the whole answer, as at once.
+ */
+async function streamRepository(source: Source, rules: Rules, ref: string, response: ServerResponse) {
+  const line = startLines(response);
+  const { repository } = source;
+  line({ type: 'opened', ...repositoryHead(repository, ref) });
+  try {
+    const result = await scan(source, rules, (skill) => line({ type: 'skill', skill: skillAnswer(repository, skill) }));
+    line({ type: 'done', scan: repositoryAnswer(result, ref) });
+  } catch (error) {
+    if (!(error instanceof AtlasError)) throw error;
+    line({ type: 'error', error: error.message });
+  }
+  response.end();
+}
+
+/**
+ * An organization, a line at a time, so the page adds each repository as soon as it is scanned:
+ * the owner first, then each repository's skills as they are read and the repository once it is
+ * done, then the warnings.
+ */
+async function streamOrganization(organization: Organization, rules: Rules, response: ServerResponse) {
+  const line = startLines(response);
+  const { owner, listed, repositories } = organization;
+  line({ type: 'organization', source: owner.url, owner, listed, scanning: repositories.length });
+  try {
+    const result = await scanOrganization(organization, rules, {
+      found: (index, repository, skill) => line({ type: 'skill', index, ...repositoryHead(repository, ''), skill: skillAnswer(repository, skill) }),
+      scanned: (index, scanned) =>
+        line({ type: 'repository', index, repository: scanned && scanned.skills.length > 0 ? repositoryAnswer(scanned, '') : undefined }),
+    });
+    line({ type: 'done', warnings: result.warnings });
+  } catch (error) {
+    if (!(error instanceof AtlasError)) throw error;
+    line({ type: 'error', error: error.message });
+  }
+  response.end();
+}
+
+/** One repository's scan, as the page shows it: each skill with its link, its summary and its body made safe. */
+function repositoryAnswer(result: ScanResult, ref: string) {
+  return {
+    ...repositoryHead(result.repository, ref),
+    skills: result.skills.map((skill) => skillAnswer(result.repository, skill)),
+    warnings: result.warnings,
+    ...(result.error === undefined ? {} : { error: result.error }),
+  };
+}
+
+function repositoryHead(repository: Repository, ref: string) {
+  // What makes two scans the same repository: a new scan of it replaces the old one.
+  return { source: `https://github.com/${repository.id}${ref ? `/tree/${ref}` : ''}`, ref, repository };
+}
+
+function skillAnswer(repository: Repository, { body, ...skill }: Skill) {
+  const link = skillLink(repository, { ...skill, body });
+  const raw = link.replace(`${repository.url}/blob/`, `https://raw.githubusercontent.com/${repository.id}/`);
+  const root = { page: `${repository.url}/blob/${repository.commit}/`, raw: `https://raw.githubusercontent.com/${repository.id}/${repository.commit}/` };
+  return { ...skill, summary: firstSentence(skill.description), link, html: renderBody(body, { page: link, raw }, root) };
 }
 
 function send(response: ServerResponse, status: number, body: unknown) {

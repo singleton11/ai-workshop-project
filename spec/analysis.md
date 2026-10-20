@@ -2,7 +2,8 @@
 
 ## Input
 
-A **GitHub repository** URL, or a local directory
+A **GitHub repository** URL, a **GitHub organization**'s URL (`https://github.com/<owner>`, a user's
+too: [below](#an-organization)), or a local directory
 
 ## Output
 
@@ -32,6 +33,31 @@ Web: a thin client too, [web.md](web.md).
   code search, no symbolic links are looked for: they could point at a file it did not reach.
   The error is the first one: the listing's, else a link's, else a file's, in path order.
   Before the commit is known there is nothing to keep: the error is all there is.
+
+## An organization
+
+`https://github.com/<owner>`, with or without the scheme or a trailing slash: every repository
+the organization, or the user, owns is scanned, each as on its own, with the same rules.
+
+- Forks and archived repositories are left out: a fork's skills are its upstream's, an archived
+  repository's are no longer kept. *listed* counts the repositories that are left.
+- Without `GITHUB_TOKEN`, each listed repository is listed through its tree; at 60 requests an hour,
+  that is enough for a small organization only. With it, **one code search** over the owner
+  (`filename:SKILL.md org:<owner>`, `user:` for a user) finds the `SKILL.md` files, and only the
+  repositories it finds one in are opened: no request for the others. If the search cannot list
+  them all (more than 1000 results, or GitHub says they are incomplete), a *warning*, and every
+  listed repository is listed through its tree instead.
+- The result: the repositories with at least one skill, sorted by name in any letter case, then
+  code-unit order; each with its skills and warnings as for one repository.
+- A repository that fails (it went away, an answer GitHub cannot give) is a *warning*,
+  `<owner>/<repo>: <message>; skipped`, and the scan goes on; an empty one (no commit) is skipped
+  without one. The warnings of a repository without skills are kept, `<owner>/<repo>: <warning>`.
+- A repository scan that stops partway keeps its successfully read skills and warnings. If it has
+  skills, its partial error stays with it; with no skills, its error is an organization warning.
+- Rate limit, a rejected token or no network **stops** the scan: a clear message, exit code 1,
+  nothing printed; every other repository would fail the same way.
+- An unknown owner → `Organization or user not found: https://github.com/<owner>`, exit code 1.
+- At most 8 repositories are scanned at the same time.
 
 ## What is a skill
 
