@@ -185,24 +185,33 @@ test('GET /api/scan for an organization: its repositories with skills, each as f
 
 /**
  * A server whose GitHub holds these requests back until each is released, then answers it from the
- * recording, or with `answers`.
+ * recording, or with `answers`. A request is aborted, held back or not, as fetch's would be;
+ * `fetched` is every one asked for.
  */
 async function holding(held: string[], answers: Recording = {}) {
   const releases = new Map<string, () => void>();
   const waits = new Map(held.map((url) => [url, new Promise<void>((resolve) => releases.set(url, resolve))]));
+  const fetched: string[] = [];
   const github: Fetch = async (url, init) => {
-    await waits.get(url);
+    fetched.push(url);
+    const { signal } = init ?? {};
+    await Promise.race([
+      waits.get(url),
+      new Promise((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason), { once: true })),
+    ]);
+    signal?.throwIfAborted();
     return replay({ ...RECORDING, ...answers })(url, init);
   };
   const server = createWebServer({
-    open: (url) => openGitHub(url, { fetch: github }),
-    openOwner: (url) => openGitHubOwner(url, { fetch: github }),
+    open: (url, signal) => openGitHub(url, { fetch: github, signal }),
+    openOwner: (url, signal) => openGitHubOwner(url, { fetch: github, signal }),
     rules: DEFAULTS,
     note: () => {},
   });
   const address = await listen(server, 0);
   return {
     address,
+    fetched,
     release: (url: string) => releases.get(url)?.(),
     close: () => {
       for (const release of releases.values()) release();
@@ -312,6 +321,36 @@ test('a repository, a line at a time: a file that fails on the way is the last l
   assert.equal(messages[0].type, 'opened');
   assert.deepEqual(messages.at(-1), { type: 'error', error: `GitHub answered 500 for ${failing}` });
   assert.ok(messages.slice(1, -1).every((message) => message.type === 'skill'));
+});
+
+test('a page that goes away stops its scan: nothing more is fetched, and no queued repository is opened', async (t) => {
+  // many: 12 repositories, each held back once it is opened; 8 are scanned at once, so 4 wait.
+  const names = Array.from({ length: 12 }, (_, i) => `many/r${String(i + 1).padStart(2, '0')}`);
+  const commits = (name: string) => `https://api.github.com/repos/${name}/commits/main`;
+  const server = await holding(names.map(commits), {
+    'https://api.github.com/users/many': { status: 200, body: { login: 'many', type: 'Organization' } },
+    'https://api.github.com/orgs/many/repos?type=all&per_page=100&page=1': {
+      status: 200,
+      body: names.map((full_name) => ({ full_name, default_branch: 'main', fork: false, archived: false })),
+    },
+    ...Object.fromEntries(names.map((name) => [commits(name), { status: 200, body: { sha: COMMIT } }])),
+    ...Object.fromEntries(names.map((name) => [`https://api.github.com/repos/${name}/git/trees/${COMMIT}?recursive=1`, tree([])])),
+  });
+  t.after(server.close);
+  const controller = new AbortController();
+  const response = await fetch(`${server.address}api/scan?url=${encodeURIComponent('github.com/many')}`, {
+    headers: { Accept: 'application/x-ndjson' },
+    signal: controller.signal,
+  });
+  const reader = response.body!.getReader();
+  assert.match(new TextDecoder().decode((await reader.read()).value), /"type":"organization"/);
+  await until(() => server.fetched.filter((url) => url.endsWith('/commits/main')).length === 8);
+  controller.abort();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  for (const name of names) server.release(commits(name));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(server.fetched.filter((url) => url.endsWith('/commits/main')), names.slice(0, 8).map(commits));
+  assert.deepEqual(server.fetched.filter((url) => url.includes('/git/trees/')), []);
 });
 
 test('a broken rules file → 422 and nothing is fetched', async (t) => {
@@ -799,8 +838,12 @@ test('the page: an entry removed while it is being scanned is gone, its scan wit
   assert.equal(signals[0].aborted, true);
   assert.deepEqual(p.texts('.organization-name'), []);
   assert.deepEqual(p.params(), ['https://github.com/acme/tools']);
+  await new Promise((resolve) => setTimeout(resolve, 100)); // for the server to hear the page went away
   server.release(held);
   await new Promise((resolve) => setTimeout(resolve, 100));
+  // The server stopped the scan too: acme/other, held back when it was removed, is not listed.
+  assert.ok(server.fetched.includes(held));
+  assert.ok(!server.fetched.includes(`https://api.github.com/repos/acme/other/git/trees/${OTHER}?recursive=1`));
   assert.deepEqual(p.texts('.organization-name'), []);
   assert.deepEqual(p.texts('.repository-name'), ['acme/tools']);
   assert.deepEqual(p.params(), ['https://github.com/acme/tools']);

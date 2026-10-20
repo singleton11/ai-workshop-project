@@ -13,10 +13,10 @@ import { scan, type ScanResult, type Source } from '../core/scan.ts';
 import { renderBody } from './render.ts';
 
 export type WebOptions = {
-  /** Opens a GitHub repository URL. */
-  open(url: string): Promise<Source>;
-  /** Opens a GitHub organization's (or user's) URL: every repository it has. */
-  openOwner(url: string): Promise<Organization>;
+  /** Opens a GitHub repository URL; once `signal` is aborted, no more is fetched for it. */
+  open(url: string, signal: AbortSignal): Promise<Source>;
+  /** Opens a GitHub organization's (or user's) URL: every repository it has. Once `signal` is aborted, no more is fetched for it. */
+  openOwner(url: string, signal: AbortSignal): Promise<Organization>;
   rules: RulesStore;
   /** Where the rules file's notes go: the server's stderr. */
   note(text: string): void;
@@ -77,13 +77,19 @@ async function scanRequest(input: string, stream: boolean, response: ServerRespo
   const owner = name ? undefined : parseGitHubOwnerUrl(input);
   if (!input.trim()) return send(response, 400, { error: 'Paste a GitHub repository or organization URL' });
   if (!name && !owner) return send(response, 400, { error: `Not a GitHub repository or organization URL: ${input.trim()}` });
+  // A page that goes away before its answer is done (a removed entry, a closed tab) stops its scan:
+  // nothing more is fetched from GitHub for it.
+  const gone = new AbortController();
+  response.once('close', () => {
+    if (!response.writableFinished) gone.abort();
+  });
   try {
     // The rules first, as in the CLI: a broken rules file stops the scan before anything is fetched.
     const file = await rules.load(undefined, note);
     const parsed = parseRules(file.text, file.path);
-    if (name && stream) return await streamRepository(await open(input), parsed, name.ref ?? '', response);
-    if (name) return send(response, 200, repositoryAnswer(await scan(await open(input), parsed), name.ref ?? ''));
-    const organization = await openOwner(input);
+    if (name && stream) return await streamRepository(await open(input, gone.signal), parsed, name.ref ?? '', response);
+    if (name) return send(response, 200, repositoryAnswer(await scan(await open(input, gone.signal), parsed), name.ref ?? ''));
+    const organization = await openOwner(input, gone.signal);
     if (stream) return await streamOrganization(organization, parsed, response);
     const result = await scanOrganization(organization, parsed);
     send(response, 200, {
@@ -95,6 +101,7 @@ async function scanRequest(input: string, stream: boolean, response: ServerRespo
       warnings: result.warnings,
     });
   } catch (error) {
+    if (gone.signal.aborted) return void response.destroy(); // no one to answer
     if (!(error instanceof AtlasError)) throw error;
     send(response, 422, { error: error.message });
   }

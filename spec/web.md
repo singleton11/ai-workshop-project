@@ -83,5 +83,8 @@ object on each.
 
 A failure after the first line is the last line, `{ type: "error", error }`, with the CLI's message;
 before it, the status and body are as without the header.
+A page that goes away before its answer is done (*Remove* on an entry being scanned, a closed tab)
+stops the scan on the server too: nothing more is asked of GitHub for it, the requests under way are
+cancelled, and no repository of an organization still waiting its turn is opened.
 A bad or missing URL, or a local path → `400 { error }`; any other failure the CLI explains
 (not found, rate limit, broken rules file) → `422 { error }`, with the CLI's message.

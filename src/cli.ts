@@ -21,8 +21,8 @@ process.exitCode = await run(process.argv.slice(2), {
   serve: (port) =>
     listen(
       createWebServer({
-        open: (url) => openGitHub(url, { fetch, token }),
-        openOwner: (url) => openGitHubOwner(url, { fetch, token }),
+        open: (url, signal) => openGitHub(url, { fetch, token, signal }),
+        openOwner: (url, signal) => openGitHubOwner(url, { fetch, token, signal }),
         rules,
         note: (text) => console.error(text),
       }),

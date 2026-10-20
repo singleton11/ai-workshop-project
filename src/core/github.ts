@@ -4,12 +4,14 @@ import type { Organization } from './organization.ts';
 import type { Source } from './scan.ts';
 
 /** The part of `fetch` the core uses, so tests and the browser can pass their own. */
-export type Fetch = (url: string, init?: { headers?: Record<string, string> }) => Promise<Response>;
+export type Fetch = (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<Response>;
 
 export type GitHubOptions = {
   fetch: Fetch;
   /** With a token, skills are found through code search; without it, through the tree. */
   token?: string;
+  /** Once it is aborted, no request is made and those under way stop: each fails with its reason. */
+  signal?: AbortSignal;
 };
 
 const API = 'https://api.github.com';
@@ -237,15 +239,18 @@ function entries(tree: Tree, prefix: string): { files: string[]; links: string[]
 
 type Client = ReturnType<typeof client>;
 
-function client({ fetch, token }: GitHubOptions) {
+function client({ fetch, token, signal }: GitHubOptions) {
   const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
   if (token) headers.Authorization = `Bearer ${token}`;
   const answers = new Map<string, Promise<unknown>>(); // the root tree is asked for once per skill root
 
   async function get(url: string, init?: { headers: Record<string, string> }): Promise<Response> {
+    signal?.throwIfAborted();
     try {
-      return await fetch(url, init);
+      return await fetch(url, { ...init, signal });
     } catch (error) {
+      // Not GitHub's failure: whoever asked went away.
+      signal?.throwIfAborted();
       throw new GitHubUnavailable(`Cannot reach GitHub: ${describe(error)}`);
     }
   }
