@@ -17,6 +17,13 @@ export type Organization = {
   warnings: string[];
 };
 
+/**
+ * How far listing an owner's repositories has got, before any of them is scanned: spec/web.md.
+ * `repositories`: those listed so far, forks and archived ones left out; `search`, once code search
+ * is under way, the SKILL.md files it found so far of the `total` it says it has.
+ */
+export type OwnerListing = { owner: Owner; repositories: number; search?: { found: number; total: number } };
+
 export type OrganizationResult = {
   owner: Owner;
   listed: number;

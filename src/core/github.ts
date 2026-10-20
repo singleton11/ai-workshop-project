@@ -1,6 +1,6 @@
 import { AtlasError, EmptyRepository, GitHubUnavailable } from './errors.ts';
 import { compare, SKILL_ROOTS } from './find.ts';
-import type { Organization } from './organization.ts';
+import type { Organization, OwnerListing } from './organization.ts';
 import type { Source } from './scan.ts';
 
 /** The part of `fetch` the core uses, so tests and the browser can pass their own. */
@@ -110,30 +110,36 @@ async function openRepository(
  * each one is listed through its tree. With one, a single code search over the owner finds the
  * SKILL.md files, and only the repositories it finds them in are opened; if the search cannot
  * list them all (more than 1000), every repository is listed through its tree instead.
+ * `listing` hears how far it has got: once the owner is found, after each page of repositories,
+ * then after each page of the code search.
  */
-export async function openGitHubOwner(input: string, options: GitHubOptions): Promise<Organization> {
+export async function openGitHubOwner(input: string, options: GitHubOptions, listing?: (progress: OwnerListing) => void): Promise<Organization> {
   const name = parseGitHubOwnerUrl(input);
   if (!name) throw new AtlasError(`Not a GitHub organization URL: ${input}`);
   const github = client(options);
-  const owner = await github.json<{ login: string; type: string }>(
+  const user = await github.json<{ login: string; type: string }>(
     `${API}/users/${name.owner}`,
     `Organization or user not found: https://github.com/${name.owner}`,
   );
-  const isOrganization = owner.type === 'Organization';
-  const all: (RepositoryInfo & { fork: boolean; archived: boolean })[] = [];
+  const isOrganization = user.type === 'Organization';
+  const owner = { id: user.login, url: `https://github.com/${user.login}` };
+  const listed: (RepositoryInfo & { fork: boolean; archived: boolean })[] = [];
+  listing?.({ owner, repositories: 0 });
   // 100 a page; a short page is the last one.
   for (let page = 1; ; page++) {
-    const items = await github.json<typeof all>(
-      `${API}/${isOrganization ? `orgs/${owner.login}/repos?type=all` : `users/${owner.login}/repos?type=owner`}&per_page=100&page=${page}`,
+    const items = await github.json<typeof listed>(
+      `${API}/${isOrganization ? `orgs/${user.login}/repos?type=all` : `users/${user.login}/repos?type=owner`}&per_page=100&page=${page}`,
     );
-    all.push(...items);
+    listed.push(...items.filter((info) => !info.fork && !info.archived));
+    listing?.({ owner, repositories: listed.length });
     if (items.length < 100) break;
   }
-  const listed = all.filter((info) => !info.fork && !info.archived).sort((a, b) => compareNames(a.full_name, b.full_name));
+  listed.sort((a, b) => compareNames(a.full_name, b.full_name));
   const warnings: string[] = [];
   let found: Map<string, string[]> | undefined;
   if (github.token) {
-    found = await searchOwner(github, `${isOrganization ? 'org' : 'user'}:${owner.login}`);
+    found = await searchOwner(github, `${isOrganization ? 'org' : 'user'}:${user.login}`, (search) =>
+      listing?.({ owner, repositories: listed.length, search }));
     if (!found) warnings.push('code search found more SKILL.md files than it can list; every repository was listed through its tree');
   }
   const repositories = listed
@@ -143,11 +149,18 @@ export async function openGitHubOwner(input: string, options: GitHubOptions): Pr
       // Through the tree when the search could not cover everything, as without a token.
       return { id: info.full_name, open: () => openRepository(github, info, { searched, tree: !searched }) };
     });
-  return { owner: { id: owner.login, url: `https://github.com/${owner.login}` }, listed: listed.length, repositories, warnings };
+  return { owner, listed: listed.length, repositories, warnings };
 }
 
-/** Every SKILL.md code search finds for `qualifier`, by repository (lower case); undefined if it cannot list them all. */
-async function searchOwner(github: Client, qualifier: string): Promise<Map<string, string[]> | undefined> {
+/**
+ * Every SKILL.md code search finds for `qualifier`, by repository (lower case); undefined if it cannot
+ * list them all. `searched` hears after each page how many it found so far, of how many.
+ */
+async function searchOwner(
+  github: Client,
+  qualifier: string,
+  searched: (search: { found: number; total: number }) => void,
+): Promise<Map<string, string[]> | undefined> {
   const found = new Map<string, Set<string>>(); // pages can repeat a result
   for (let page = 1; ; page++) {
     const result = await github.json<{ total_count: number; incomplete_results: boolean; items: { path: string; repository: { full_name: string } }[] }>(
@@ -159,6 +172,8 @@ async function searchOwner(github: Client, qualifier: string): Promise<Map<strin
       const key = item.repository.full_name.toLowerCase();
       found.set(key, (found.get(key) ?? new Set()).add(item.path));
     }
+    const count = [...found.values()].reduce((sum, paths) => sum + paths.size, 0);
+    searched({ found: Math.min(count, result.total_count), total: result.total_count });
     if (result.items.length < 100 || page * 100 >= result.total_count) break;
   }
   return new Map([...found].map(([key, paths]) => [key, [...paths]]));

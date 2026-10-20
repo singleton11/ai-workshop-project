@@ -7,7 +7,7 @@ import { firstSentence, type RulesStore } from '../commands.ts';
 import { AtlasError } from '../core/errors.ts';
 import { parseGitHubOwnerUrl, parseGitHubUrl } from '../core/github.ts';
 import { skillLink, type Repository, type Skill } from '../core/model.ts';
-import { scanOrganization, type Organization } from '../core/organization.ts';
+import { scanOrganization, type Organization, type OwnerListing } from '../core/organization.ts';
 import { parseRules, type Rules } from '../core/rules.ts';
 import { scan, type ScanResult, type Source } from '../core/scan.ts';
 import { renderBody } from './render.ts';
@@ -15,8 +15,11 @@ import { renderBody } from './render.ts';
 export type WebOptions = {
   /** Opens a GitHub repository URL; once `signal` is aborted, no more is fetched for it. */
   open(url: string, signal: AbortSignal): Promise<Source>;
-  /** Opens a GitHub organization's (or user's) URL: every repository it has. Once `signal` is aborted, no more is fetched for it. */
-  openOwner(url: string, signal: AbortSignal): Promise<Organization>;
+  /**
+   * Opens a GitHub organization's (or user's) URL: every repository it has. Once `signal` is aborted,
+   * no more is fetched for it. `listing` hears how far listing its repositories has got.
+   */
+  openOwner(url: string, signal: AbortSignal, listing?: (progress: OwnerListing) => void): Promise<Organization>;
   rules: RulesStore;
   /** Where the rules file's notes go: the server's stderr. */
   note(text: string): void;
@@ -89,8 +92,8 @@ async function scanRequest(input: string, stream: boolean, response: ServerRespo
     const parsed = parseRules(file.text, file.path);
     if (name && stream) return await streamRepository(await open(input, gone.signal), parsed, name.ref ?? '', response);
     if (name) return send(response, 200, repositoryAnswer(await scan(await open(input, gone.signal), parsed), name.ref ?? ''));
+    if (stream) return await streamOrganization(input, parsed, response, openOwner, gone.signal);
     const organization = await openOwner(input, gone.signal);
-    if (stream) return await streamOrganization(organization, parsed, response);
     const result = await scanOrganization(organization, parsed);
     send(response, 200, {
       // An organization is one entry in the catalog, like a repository: the same source replaces it.
@@ -107,8 +110,10 @@ async function scanRequest(input: string, stream: boolean, response: ServerRespo
   }
 }
 
+type Line = (body: unknown) => void;
+
 /** The start of a line-at-a-time answer; once it is out, a failure can only be a line of its own. */
-function startLines(response: ServerResponse) {
+function startLines(response: ServerResponse): Line {
   response.writeHead(200, { ...HEADERS, 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' });
   // A page that went away, or stopped listening, hears nothing more.
   return (body: unknown) => {
@@ -135,23 +140,27 @@ async function streamRepository(source: Source, rules: Rules, ref: string, respo
 }
 
 /**
- * An organization, a line at a time, so the page adds each repository as soon as it is scanned:
- * the owner first, then each repository's skills as they are read and the repository once it is
- * done, then the warnings.
+ * An organization, a line at a time, so the page shows how far it has got all along: how many
+ * repositories are listed, and code search's SKILL.md files, while they are listed; then the owner,
+ * each repository's skills as they are read and the repository once it is done; then the warnings.
+ * Until the first line, a failure (an unknown owner) is answered as without lines.
  */
-async function streamOrganization(organization: Organization, rules: Rules, response: ServerResponse) {
-  const line = startLines(response);
-  const { owner, listed, repositories } = organization;
-  line({ type: 'organization', source: owner.url, owner, listed, scanning: repositories.length });
+async function streamOrganization(input: string, rules: Rules, response: ServerResponse, openOwner: WebOptions['openOwner'], signal: AbortSignal) {
+  let line: Line | undefined;
   try {
+    const organization = await openOwner(input, signal, ({ owner, repositories, search }) =>
+      (line ??= startLines(response))({ type: 'listing', source: owner.url, owner, repositories, ...(search ? { search } : {}) }));
+    const write = (line ??= startLines(response));
+    const { owner, listed, repositories } = organization;
+    write({ type: 'organization', source: owner.url, owner, listed, scanning: repositories.length });
     const result = await scanOrganization(organization, rules, {
-      found: (index, repository, skill) => line({ type: 'skill', index, ...repositoryHead(repository, ''), skill: skillAnswer(repository, skill) }),
+      found: (index, repository, skill) => write({ type: 'skill', index, ...repositoryHead(repository, ''), skill: skillAnswer(repository, skill) }),
       scanned: (index, scanned) =>
-        line({ type: 'repository', index, repository: scanned && scanned.skills.length > 0 ? repositoryAnswer(scanned, '') : undefined }),
+        write({ type: 'repository', index, repository: scanned && scanned.skills.length > 0 ? repositoryAnswer(scanned, '') : undefined }),
     });
-    line({ type: 'done', warnings: result.warnings });
+    write({ type: 'done', warnings: result.warnings });
   } catch (error) {
-    if (!(error instanceof AtlasError)) throw error;
+    if (!line || !(error instanceof AtlasError)) throw error;
     line({ type: 'error', error: error.message });
   }
   response.end();
