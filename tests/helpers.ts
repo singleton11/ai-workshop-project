@@ -1,5 +1,7 @@
 // Runs the commands the way the CLI does, with GitHub answering from EXAMPLE below.
+import { existsSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { run, type RulesStore } from '../src/commands.ts';
 import { openGitHub, openGitHubOwner, parseGitHubOwnerUrl, parseGitHubUrl, type Fetch } from '../src/core/github.ts';
@@ -9,6 +11,15 @@ import { openDirectory } from '../src/local.ts';
 
 export const FIXTURE = fileURLToPath(new URL('../fixture', import.meta.url));
 export const CLI = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
+
+/** The agent skills skill-atlas keeps for working on itself, `.agents/skills/<name>`: a scan of this checkout finds them. */
+const OWN = join(FIXTURE, '../.agents/skills');
+export const OWN_SKILLS = readdirSync(OWN).filter((name) => existsSync(join(OWN, name, 'SKILL.md')));
+
+/** The first line of a scan that found `n` skills. */
+export function found(n: number): RegExp {
+  return new RegExp(`^\\S+ · ${n} ${n === 1 ? 'skill' : 'skills'}(\n|$)`);
+}
 
 /** The commit GitHub answers for JetBrains/example. */
 export const EXAMPLE_COMMIT = '5ab6270ab772d113e8ad52ebfcaa0109c522ae00';

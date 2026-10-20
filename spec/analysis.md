@@ -72,7 +72,8 @@ Not a skill: a `SKILL.md` that matches no `skills` pattern (`plugins/foo/resourc
 or that is test data. Each one gets a *warning*; the rules can turn each kind of warning off.
 
 Paths are taken from the scanned folder. With the default rules, scanning skill-atlas itself
-finds 0 skills plus test-data warnings for `fixture/`; scanning `./fixture` finds its skills.
+finds only the agent skills it keeps for working on it, in `.agents/skills/`, plus test-data
+warnings for `fixture/`; scanning `./fixture` finds its skills.
 
 ## Duplicates
 

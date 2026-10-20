@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test, type TestContext } from 'node:test';
-import { atlas, EXAMPLE_COMMIT, FIXTURE } from './helpers.ts';
+import { atlas, EXAMPLE_COMMIT, FIXTURE, found, OWN_SKILLS } from './helpers.ts';
 
 const ROOT = join(FIXTURE, '..');
 
@@ -109,10 +109,12 @@ test('not a skill, and test data: not listed, each with a warning that names why
   );
 });
 
-test('scanning skill-atlas itself finds 0 skills, and warns about the fixture as test data', async () => {
+test('scanning skill-atlas itself finds only its own agent skills, and warns about the fixture as test data', async () => {
   const result = await atlas(['scan', ROOT]);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /^\S+ · 0 skills$/);
+  assert.match(result.stdout, found(OWN_SKILLS.length));
+  const links = result.stdout.split('\n').filter((line) => line.startsWith('  ')).map((line) => line.trim());
+  assert.deepEqual(links.sort(), OWN_SKILLS.map((name) => pathToFileURL(join(ROOT, '.agents/skills', name, 'SKILL.md')).href).sort());
   assert.equal(
     result.stderr,
     [
