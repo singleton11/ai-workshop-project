@@ -1,0 +1,27 @@
+# skill-atlas rules: which SKILL.md files are skills. Edit freely.
+# Patterns are globs on a SKILL.md's path from the scanned folder, in any letter case:
+#   *  any part of one folder name     **  any number of folders, none included
+# A SKILL.md is a skill if it matches a `skills` pattern and no `test-data` pattern.
+version: 1
+skills:
+  - SKILL.md                 # the repository root
+  - "**/skills/**/SKILL.md"  # under a skills folder, at any depth
+test-data:
+  - "**/test/**"
+  - "**/tests/**"
+  - "**/testdata/**"
+  - "**/test-data/**"
+  - "**/test_data/**"
+  - "**/__tests__/**"
+  - "**/fixture/**"
+  - "**/fixtures/**"
+  - "**/testresources/**"
+  - "**/__snapshots__/**"
+  - "**/node_modules/**"
+  - "**/vendor/**"
+  - "**/third_party/**"
+  - "**/integration-tests/**"
+warnings:
+  not-a-skill: true   # a SKILL.md that matches no `skills` pattern
+  test-data: true     # a SKILL.md that matches a `test-data` pattern
+  same-name: true     # different skills with the same name

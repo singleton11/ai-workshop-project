@@ -31,3 +31,32 @@ jobs:
         run: |
           ./skill-atlas help
           ./skill-atlas scan ./fixture
+
+  # Demos as visual tests (tests/visual/README.md): the key moments of each demo, screenshotted in
+  # one Docker image, compared by Argos with the approved baseline. Argos posts its own `argos`
+  # check: red while anything differs, green once a human approves the build on argos-ci.com.
+  # Pull requests, and main for the baseline; a push to any other branch would be a second build.
+  visual:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:visual
+      # Every run, passing or failing: its videos, screenshots and traces.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: visual-${{ github.run_attempt }}
+          path: |
+            tests/visual/results/
+            tests/visual/screenshots/
+          retention-days: 30
+      # Tokenless: Argos checks the run with GitHub; no secret, works for forks too.
+      - name: Compare with the baseline (Argos)
+        run: npx argos upload tests/visual/screenshots

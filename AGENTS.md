@@ -30,25 +30,26 @@ Every recording, local or CI, uses the same inputs, so two runs of unchanged cod
 - **Data:** replay the recorded GitHub responses (`flaky.mjs` replay) for a pinned repository and commit;
   fixed rules file, clock, locale, timezone and random seed. No live network on camera.
 - **Viewport:** 1280×800, device scale factor 1, same terminal size and font size in VHS.
-- **Fonts:** only the fonts installed by `setup.sh`, at pinned versions; no system fallback fonts.
-- Same OS image, Chromium and VHS versions as CI. A baseline recorded under other conditions is invalid.
+- **Fonts:** only the fonts in the `tests/visual/Dockerfile` image, pinned by its tag; no host fonts.
+- Same OS image, Chromium and VHS versions as CI: record in that image. Baselines come only from CI.
 
 ### Demos are tests
-Each demo is also a deterministic e2e test:
+Each demo is also a deterministic e2e test in [tests/visual/](tests/visual/README.md):
 - Screenshot the key moments: one per caption step, plus every error or empty state shown.
-- The screenshots live with the demo script and run on CI for every pull request, next to `npm run test:e2e`.
-- CI uploads them to the cloud visual-review service, which compares them with the approved baseline of
-  the base branch. Any pixel difference fails the check until a human approves it.
+- Add the demo's steps to `tests/visual/` (Playwright spec, VHS tape); CI's `visual` job runs them.
+- CI uploads them to Argos, which compares them with the approved baseline of `main`. Any pixel
+  difference makes the required `argos` check red, blocking the merge, until a human approves it.
 - A human approves changes in the service's side-by-side view (baseline | new | diff). Agents never
   approve or update baselines; they only report what changed and why.
 - Approved screenshots on `main` become the new baseline.
 
 ### Record every run
 Every demo or e2e run, local or CI, passing or failing, keeps its video and screenshots:
-- CI uploads them as workflow artifacts and links them from the visual-review build.
+- CI uploads them as the `visual-<attempt>` workflow artifact.
 - A failing run's video is the first thing to look at when debugging it.
 
 ## Commands
 - `npm ci`: first, in a fresh checkout
 - `npm test`: the tests
 - `npm run test:e2e`: real repositories against snapshots; `npm run test:e2e:update` rewrites them
+- `npm run test:visual`: the demos as visual tests, in Docker; `tests/visual/screenshots/` and `results/`
