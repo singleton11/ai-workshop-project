@@ -34,9 +34,14 @@ if [ "$(uname)" != Darwin ]; then
   # The libraries Chromium needs, and fonts.
   $sudo env PATH="$PATH" npx playwright-core install-deps chromium
   # VHS drives a Chromium of its own, found only at these paths; else it downloads one. Give it Playwright's.
-  if ! ls /usr/bin/chromium /usr/bin/chromium-browser /usr/bin/google-chrome /usr/bin/google-chrome-stable >/dev/null 2>&1; then
+  # Never replaces one that is there, even a broken link.
+  found=''
+  for browser in /usr/bin/chromium /usr/bin/chromium-browser /usr/bin/google-chrome /usr/bin/google-chrome-stable; do
+    if [ -x "$browser" ]; then found=$browser; fi
+  done
+  if [ -z "$found" ] && [ ! -e /usr/bin/chromium ] && [ ! -L /usr/bin/chromium ]; then
     chrome=$(node -e "console.log(require('playwright-core').chromium.executablePath())")
-    $sudo ln -sf "$chrome" /usr/bin/chromium
+    $sudo ln -s "$chrome" /usr/bin/chromium
   fi
 fi
 vhs --version

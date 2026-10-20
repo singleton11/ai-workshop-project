@@ -25,6 +25,7 @@ for clip in "$@"; do
   fi
   i=$((i + 1))
 done
+mkdir -p -- "$(dirname -- "$out")"
 ffmpeg -v error -y "${inputs[@]}" -filter_complex "${filter%;}" -map "[$last]" \
   -c:v libx264 -crf 20 -preset slow -pix_fmt yuv420p -movflags +faststart "$out"
 total=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$out")
