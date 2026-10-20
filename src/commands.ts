@@ -20,12 +20,15 @@ export type Context = {
   /** Errors and warnings. */
   error(text: string): void;
   rules: RulesStore;
+  /** Starts the web interface and returns its address; only the Node CLI has one. spec/web.md. */
+  serve?(port: number): Promise<string>;
 };
 
 const usage = `Usage: skill-atlas <command>
 
   scan [--rules <file>] <GitHub URL | directory>   find every skill in a repository and print it
   rules [--defaults]                               show the rules file: what is a skill, and what is not
+  serve [--port <n>]                               open the catalog in a browser, at http://localhost:4173/
   help                                             show this help`;
 
 /** Runs one command; returns its exit code. */
@@ -34,6 +37,7 @@ export async function run(args: string[], context: Context): Promise<number> {
   try {
     if (command === 'scan') await scanCommand(rest, context);
     else if (command === 'rules') await rulesCommand(rest, context);
+    else if (command === 'serve') await serveCommand(rest, context);
     else if (command === 'help') context.print(usage);
     else throw new AtlasError(`Unknown command: ${command}\n\n${usage}`);
     return 0;
@@ -72,6 +76,15 @@ async function rulesCommand(args: string[], context: Context) {
   context.print((text ?? DEFAULT_RULES).trimEnd());
 }
 
+async function serveCommand(args: string[], context: Context) {
+  const usage = 'Usage: skill-atlas serve [--port <n>]';
+  let port = 4173;
+  if (args.length === 2 && args[0] === '--port' && /^\d+$/.test(args[1]) && Number(args[1]) <= 65535) port = Number(args[1]);
+  else if (args.length !== 0) throw new AtlasError(usage);
+  if (!context.serve) throw new AtlasError('serve runs only from the command line');
+  context.print(`Skill Atlas: ${await context.serve(port)}`);
+}
+
 /** `<owner>/<repo> · N skills`, then each skill's name, first sentence and link. */
 function printRepository(repository: Repository, skills: Skill[], { print }: Context) {
   print(`${repository.id} · ${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}`);
@@ -82,7 +95,7 @@ function printRepository(repository: Repository, skills: Skill[], { print }: Con
   }
 }
 
-function firstSentence(text: string): string {
+export function firstSentence(text: string): string {
   const line = text.replace(/\s+/g, ' ').trim();
   return /^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line;
 }

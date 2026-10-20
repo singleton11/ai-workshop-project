@@ -26,6 +26,14 @@ test('malformed front matter → the directory name, no description and a warnin
   );
 });
 
+test('front matter that refers to itself → malformed, so a JSON answer cannot fail on it', () => {
+  const parsed = parseSkill('---\nname: loop\nmetadata: &m { self: *m }\n---\nBody.\n');
+  assert.equal(parsed.name, undefined);
+  assert.deepEqual(parsed.properties, {});
+  assert.equal(parsed.warning, 'front matter refers to itself; using the directory name');
+  assert.doesNotThrow(() => JSON.stringify(parsed));
+});
+
 test('scan prints the repository, then each skill with its first sentence and pinned link', () => {
   assert.equal(example.code, 0, example.stderr);
   assert.equal(

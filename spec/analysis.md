@@ -12,14 +12,16 @@ Every `SKILL.md`: **name**, **description**, **link**
 
 Core: fetch → find ([rules](rules.md)) → parse. The rules are an input to the core; the core never
 reads or writes the rules file. CLI: a *thin client*; it loads the rules, or creates them.
-Skill: id = `repo:path`, name, description, commit
+Skill: id = `repo:path`, name, description, commit, the other front matter keys, the body.
+Web: a thin client too, [web.md](web.md).
 
 ## Details
 
 - **GitHub API**, no clone; *under 5 s* for intellij-community
 - The name: front matter, else the directory
 - The link pins the *scanned commit*
-- Malformed front matter → a *warning*, the scan goes on
+- Malformed front matter → a *warning*, the scan goes on; so is one that refers to itself
+  (`a: &m { self: *m }`)
 - Unreachable repository → a clear message, exit code 1
 
 ## What is a skill

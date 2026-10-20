@@ -91,6 +91,7 @@ test('not a skill, and test data: not listed, each with a warning that names why
     'testData/skills/t/SKILL.md': skill('IntelliJ test data.'),
     'web/__tests__/skills/t/SKILL.md': skill('Jest test data.'),
     'third_party/x/.claude/skills/t/SKILL.md': skill('Vendored.'),
+    'integration-tests/src/jvmTest/resources/skills/t/SKILL.md': skill('Integration test data.'),
   });
   const result = await scanned(root);
   assert.equal(result.code, 0);
@@ -98,6 +99,7 @@ test('not a skill, and test data: not listed, each with a warning that names why
   assert.equal(
     result.stderr,
     [
+      'warning: integration-tests/src/jvmTest/resources/skills/t/SKILL.md: test data (matches "**/integration-tests/**")',
       'warning: plugins/foo/resources/agent/SKILL.md: not a skill (matches no skills pattern)',
       'warning: src/test/.claude/skills/t/SKILL.md: test data (matches "**/test/**")',
       'warning: testData/skills/t/SKILL.md: test data (matches "**/testdata/**")',

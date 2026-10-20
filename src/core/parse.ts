@@ -31,12 +31,24 @@ export function parseSkill(text: string): ParsedSkill {
   if (typeof data !== 'object' || data === null || Array.isArray(data)) {
     return fallback('front matter is not a mapping', body);
   }
+  // An alias inside its own anchor makes a cycle that no JSON consumer can take.
+  if (cyclic(data)) return fallback('front matter refers to itself', body);
   const { name, description, ...properties } = data as Record<string, unknown>;
   return { name: asText(name) || undefined, description: asText(description), properties, body: trim(body) };
 }
 
 function fallback(reason: string, body: string): ParsedSkill {
   return { description: '', properties: {}, body: trim(body), warning: `${reason}; using the directory name` };
+}
+
+function cyclic(value: unknown, open = new Set<object>()): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  if (open.has(value)) return true;
+  open.add(value);
+  const values = value instanceof Map ? [...value.keys(), ...value.values()] : Object.values(value);
+  const found = values.some((item) => cyclic(item, open));
+  open.delete(value);
+  return found;
 }
 
 function asText(value: unknown): string {
