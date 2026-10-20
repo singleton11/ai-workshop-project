@@ -13,6 +13,9 @@ build-tools-bump-gradle-api — Bumps the Gradle API version that Kotlin Gradle 
 …
 ```
 
+`./skill-atlas scan --filter <text> <URL>` keeps the skills whose name, description or path contains
+the text, in any letter case. See [spec/cli.md](spec/cli.md).
+
 `./skill-atlas serve` opens the same scan in a browser, at http://localhost:4173/: paste repository
 links, and the skills fill a catalog you can filter; a card opens the skill, its front matter and its
 rendered body. See [spec/web.md](spec/web.md).

@@ -130,3 +130,45 @@ test('…/tree/<ref> scans that commit, through the tree even with a token', asy
     message: 'Not found in JetBrains/example: no-such-branch',
   });
 });
+
+test('--filter keeps the skills whose name, description or path contains the text, in any letter case', async () => {
+  const root = pathToFileURL(FIXTURE).href;
+  // `commits` by its name, `code-style` by its description ("…before committing…").
+  const byText = await atlas(['scan', '--filter', 'COMMIT', FIXTURE]);
+  assert.equal(byText.code, 0, byText.stderr);
+  assert.equal(
+    byText.stdout,
+    [
+      'fixture · 2 of 3 skills',
+      "code-style — Follow the project's code style.",
+      `  ${root}/.github/skills/code-style/SKILL.md`,
+      'commits — Write commit messages the way this repository does.',
+      `  ${root}/.claude/skills/commits/SKILL.md`,
+    ].join('\n'),
+  );
+  // Warnings are not filtered.
+  assert.match(byText.stderr, /^warning: \.agents\/skills\/release-checklist\/SKILL\.md: malformed front matter: /);
+
+  const byPath = await atlas(['scan', FIXTURE, '--filter', '.Agents/Skills/']);
+  assert.equal(byPath.stdout, ['fixture · 1 of 3 skills', 'release-checklist', `  ${root}/.agents/skills/release-checklist/SKILL.md`].join('\n'));
+
+  // The whole description counts, not only the first sentence that is printed.
+  const github = await atlas(['scan', '--filter', 'every commit', 'github.com/JetBrains/example']);
+  assert.equal(github.stdout.split('\n')[0], 'JetBrains/example · 1 of 1 skills');
+});
+
+test('--filter: no match is not an error; an empty text keeps every skill; given twice → usage', async () => {
+  const none = await atlas(['scan', '--filter', 'no-such-skill', FIXTURE]);
+  assert.equal(none.code, 0);
+  assert.equal(none.stdout, 'fixture · 0 of 3 skills');
+
+  assert.equal((await atlas(['scan', '--filter', ' ', FIXTURE])).stdout, fixture.stdout);
+
+  const usage = 'Usage: skill-atlas scan [--rules <file>] [--filter <text>] <GitHub URL | directory>';
+  for (const args of [['--filter', 'a', '--filter', 'b', FIXTURE], [FIXTURE, '--filter']]) {
+    const wrong = await atlas(['scan', ...args]);
+    assert.equal(wrong.code, 1);
+    assert.equal(wrong.stderr, usage);
+  }
+  assert.match((await atlas(['help'])).stdout, /scan \[--rules <file>\] \[--filter <text>\]/);
+});
