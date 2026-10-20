@@ -46,6 +46,7 @@ test-data:
   - "**/node_modules/**"
   - "**/vendor/**"
   - "**/third_party/**"
+  - "**/integration-tests/**"
 warnings:
   not-a-skill: true   # a SKILL.md that matches no `skills` pattern
   test-data: true     # a SKILL.md that matches a `test-data` pattern
