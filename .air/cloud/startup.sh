@@ -30,7 +30,9 @@ done
 
 if [[ -n $WARMUP ]]; then
   echo 'Building the pinned visual-test image and warming Docker layers...'
-  docker build -t skill-atlas-visual tests/visual
+  docker build --build-arg HTTP_PROXY --build-arg HTTPS_PROXY \
+    --build-arg http_proxy="${HTTP_PROXY:-}" --build-arg https_proxy="${HTTPS_PROXY:-}" \
+    -t skill-atlas-visual tests/visual
   echo 'Visual-test image ready.'
 fi
 
