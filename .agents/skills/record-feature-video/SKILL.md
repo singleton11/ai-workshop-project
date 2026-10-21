@@ -55,6 +55,10 @@ Load it as a preload: `node --import $DEMO/flaky.mjs src/cli.ts …`, or set
 - Other failures go in `flaky.mjs` too. For a rate limit, return
   `new Response('{"message":"API rate limit exceeded"}', { status: 403 })`.
 - Say on screen that the failure is simulated, in a comment line or a caption.
+- Clustering (`scan --cluster`, *Group by topic*) runs `claude -p`. For a take, point
+  `SKILL_ATLAS_CLAUDE` at `$DEMO/claude.mjs`: `CLAUDE_RECORD=file` runs the real `claude` and saves
+  its answer, `CLAUDE_REPLAY=file` prints it again with no model, and `CLAUDE_DELAY_MS=ms` waits
+  first, so *Grouping by topic…* shows. `tests/visual/claude.json` is one for anthropics/skills.
 
 ## 4. Terminal: VHS
 

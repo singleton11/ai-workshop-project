@@ -5,7 +5,8 @@
 // all there while a scan goes on: more scans, the filter, a skill.
 // Nothing is stored: the scanned URLs live in the address, `?repo=<url>`, the open skill in
 // `#in=<entry's source>&skill=<id>`: the same skill can be in two entries, at two commits.
-// spec/web.md.
+// *Group by topic* asks the server's model to group the catalog's skills; until the catalog changes.
+// spec/web.md, spec/clustering.md.
 
 /** @typedef {{ id: string, name: string, description: string, summary: string, path: string, link: string,
  *   commit: string, updated: string, copies: string[], properties: Record<string, unknown>, html: string }} Skill */
@@ -16,6 +17,8 @@
 /** While an organization's repositories are listed, before any is scanned: how many so far, then the
  * SKILL.md files code search found so far. @typedef {{ repositories: number, search?: { found: number, total: number } }} Listing */
 /** @typedef {{ key: string, scan?: Scan | OrganizationScan, loading: boolean, controller?: AbortController }} Entry */
+/** A skill as the catalog lists it: the entry it opens in, and its repository. @typedef {{ skill: Skill, origin: string, repository: string }} Listed */
+/** The catalog by topic: being asked for, or the answer. @typedef {{ controller?: AbortController, topics?: { topic: string, skills: Listed[] }[] }} Grouping */
 
 const $ = (id) => document.getElementById(id);
 
@@ -31,6 +34,8 @@ let shownSkill;
 let shownAt;
 /** The warnings the user opened, which stay open as scans redraw the catalog. */
 const openWarnings = new Set();
+/** The catalog by topic, if the user asked for it; by repository otherwise. @type {Grouping | undefined} */
+let grouping;
 
 /** An element, its attributes and children; text is always text. */
 function h(tag, attributes = {}, ...children) {
@@ -50,6 +55,8 @@ async function scan(input) {
   input = input.trim();
   if (!input) return;
   showError('');
+  // The topics were those of the catalog as it was.
+  ungroup();
   const existing = entries.find((entry) => entry.key === input || entry.scan?.source === input);
   if (existing?.loading) {
     // Already being scanned.
@@ -193,14 +200,87 @@ function progress() {
 
 function remove(entry) {
   entry.controller?.abort(); // its scan, if it is still going on
+  ungroup();
   entries = entries.filter((other) => other !== entry);
   saveAddress();
   render();
 }
 
-function showError(message) {
-  $('scan-error').textContent = message;
-  $('scan-error').hidden = !message;
+function showError(message, id = 'scan-error') {
+  $(id).textContent = message;
+  $(id).hidden = !message;
+}
+
+// Topics
+
+/**
+ * The catalog's skills, grouped by the server's model, or back by repository if they are already.
+ * A failure is an error under the toolbar, and the catalog stays by repository.
+ */
+async function groupByTopic() {
+  if (grouping) {
+    ungroup();
+    return renderCatalog();
+  }
+  const listed = catalogSkills();
+  const controller = new AbortController();
+  grouping = { controller };
+  showError('', 'group-error');
+  renderCatalog();
+  try {
+    const skills = listed.map(({ skill }) => ({ id: skill.id, name: skill.name, description: skill.description, body: bodyText(skill.html) }));
+    const response = await fetch('/api/cluster', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ skills }),
+      signal: controller.signal,
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error ?? `The server answered ${response.status}`);
+    const byId = new Map(listed.map((entry) => [entry.skill.id, entry]));
+    const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+    grouping = {
+      topics: body.clusters.map(({ topic, skills }) => ({
+        topic,
+        skills: skills.map((id) => byId.get(id)).filter(Boolean)
+          .sort((a, b) => compare(a.skill.name, b.skill.name) || compare(a.skill.path, b.skill.path)),
+      })),
+    };
+  } catch (error) {
+    // The catalog changed while it was asked: nothing to show, nothing to say.
+    if (controller.signal.aborted) return;
+    grouping = undefined;
+    showError(error instanceof Error ? error.message : String(error), 'group-error');
+  }
+  if (!openSkill()) renderCatalog();
+}
+
+/** Back by repository; a question still being asked is dropped. */
+function ungroup() {
+  grouping?.controller?.abort();
+  grouping = undefined;
+}
+
+/** Every skill in the catalog once, in the first entry it is in. @returns {Listed[]} */
+function catalogSkills() {
+  const seen = new Set();
+  const listed = [];
+  for (const entry of entries) {
+    for (const scan of repositoriesOf(entry.scan)) {
+      for (const skill of scan.skills) {
+        if (seen.has(skill.id)) continue;
+        seen.add(skill.id);
+        listed.push({ skill, origin: entry.scan.source, repository: scan.repository.id });
+      }
+    }
+  }
+  return listed;
+}
+
+/** A skill's body as the model reads it: the text of the page's own, safe HTML, a line per block. */
+function bodyText(html) {
+  const blocks = html.replace(/<\/(p|li|h[1-6]|pre|blockquote|tr|table|ul|ol)>/g, '$&\n');
+  return (new DOMParser().parseFromString(blocks, 'text/html').body.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 // The address: the only place the catalog is kept
@@ -268,9 +348,14 @@ function renderCatalog() {
   $('empty').hidden = entries.length > 0;
   $('toolbar').hidden = total === 0;
   $('count').textContent = filter ? `${shown} of ${total} skills` : `${total} ${total === 1 ? 'skill' : 'skills'}`;
+  const asking = Boolean(grouping?.controller);
+  const group = $('group');
+  group.disabled = asking || entries.some((entry) => entry.loading);
+  group.setAttribute('aria-pressed', String(Boolean(grouping?.topics)));
+  group.replaceChildren(...(asking ? [h('span', { class: 'spinner' }), ' Grouping by topic…'] : [grouping ? 'Show by repository' : 'Group by topic']));
   // Drawn again as scans go on: what had the keyboard's focus keeps it.
   const focused = document.activeElement?.closest?.('[data-focus]')?.getAttribute('data-focus');
-  $('repositories').replaceChildren(...entries.map(renderEntry));
+  $('repositories').replaceChildren(...(grouping?.topics ? renderTopics(grouping.topics) : entries.map(renderEntry)));
   if (focused) [...document.querySelectorAll('[data-focus]')].find((element) => element.getAttribute('data-focus') === focused)?.focus({ preventScroll: true });
 }
 
@@ -374,13 +459,27 @@ function renderWarnings(warnings, key) {
     h('ul', {}, warnings.map((warning) => h('li', {}, warning))));
 }
 
-/** @param {Skill} skill @param {string} origin */
-function renderCard(skill, origin) {
+/** The topics with a card the filter keeps: each with its skills, from any repository, each card saying which. */
+function renderTopics(topics) {
+  const shown = topics
+    .map(({ topic, skills }) => ({ topic, skills, cards: skills.filter(({ skill }) => matches(skill)) }))
+    .filter(({ cards }) => cards.length > 0);
+  if (shown.length === 0) return [h('p', { class: 'muted' }, 'No skill matches the filter.')];
+  return shown.map(({ topic, skills, cards }) => h('section', { class: 'topic', 'data-topic': topic },
+    h('div', { class: 'repository-head' },
+      h('h2', { class: 'repository-name topic-name' }, topic),
+      h('span', { class: 'badge' }, skills.length === 1 ? '1 skill' : `${skills.length} skills`)),
+    h('div', { class: 'grid' }, cards.map(({ skill, origin, repository }) => renderCard(skill, origin, repository)))));
+}
+
+/** @param {Skill} skill @param {string} origin @param {string} [repository] shown on the card, where cards of many repositories mix */
+function renderCard(skill, origin, repository) {
   const href = skillHash(origin, skill.id);
   return h('a', { class: 'card', href, 'data-skill': skill.id, 'data-focus': href, onclick: () => {
       catalogScroll = scrollY;
       openedFromCatalog = true;
     } },
+    repository && h('span', { class: 'card-repository' }, repository),
     h('span', { class: 'card-title' }, skill.name),
     h('span', { class: 'card-text' }, skill.summary || 'No description.'),
     h('span', { class: 'card-path' }, skill.path),
@@ -450,6 +549,7 @@ $('scan-form').addEventListener('submit', (event) => {
   event.preventDefault();
   scan($('scan-url').value);
 });
+$('group').addEventListener('click', groupByTopic);
 $('filter').addEventListener('input', (event) => {
   filter = event.target.value.trim().toLowerCase();
   renderCatalog();

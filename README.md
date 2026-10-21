@@ -16,11 +16,12 @@ build-tools-bump-gradle-api — Bumps the Gradle API version that Kotlin Gradle 
 `./skill-atlas scan https://github.com/JetBrains` scans every repository of an organization (or a
 user), forks and archived ones left out: [spec/analysis.md](spec/analysis.md#an-organization).
 `./skill-atlas scan --filter <text> <URL>` keeps the skills whose name, description or path contains
-the text, in any letter case. See [spec/cli.md](spec/cli.md).
+the text, in any letter case. `--cluster` groups the skills by topic, with Claude Code's `claude -p`
+and a small model: [spec/clustering.md](spec/clustering.md). See [spec/cli.md](spec/cli.md).
 
 `./skill-atlas serve` opens the same scan in a browser, at http://localhost:4173/: paste repository
 or organization links, and the skills fill a catalog you can filter; a card opens the skill, its front matter and its
-rendered body. See [spec/web.md](spec/web.md).
+rendered body; *Group by topic* groups the cards by topic. See [spec/web.md](spec/web.md).
 
 Set `GITHUB_TOKEN` for a higher GitHub rate limit. What is a skill, and what is test data, is set by
 [rules](spec/rules.md): the first scan writes them to `~/.config/skill-atlas/rules.yaml`, yours to edit;

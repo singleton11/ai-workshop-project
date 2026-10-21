@@ -8,10 +8,12 @@ import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { createBrowserBackend } from '../src/browser.ts';
+import { AtlasError } from '../src/core/errors.ts';
+import type { Ask } from '../src/core/cluster.ts';
 import { openGitHub, openGitHubOwner, type Fetch } from '../src/core/github.ts';
 import { replay, type Recorded, type Recording } from '../src/core/replay.ts';
 import { createWebServer, listen } from '../src/web/server.ts';
-import { atlas, CLI, DEFAULTS, FIXTURE, history, HISTORY, noHistory } from './helpers.ts';
+import { atlas, CLI, DEFAULTS, FIXTURE, history, HISTORY, NO_MODEL, noHistory } from './helpers.ts';
 
 const COMMIT = '1111111111111111111111111111111111111111';
 const TAGGED = '2222222222222222222222222222222222222222';
@@ -98,10 +100,13 @@ const RECORDING: Recording = {
 };
 
 let base = '';
+/** The model `/api/cluster` asks: none, unless a test sets one. */
+let model: Ask = NO_MODEL;
 const server = createWebServer({
   open: (url) => openGitHub(url, { fetch: replay(RECORDING, noHistory()) }),
   openOwner: (url, _signal, listing) => openGitHubOwner(url, { fetch: replay(RECORDING, noHistory()) }, listing),
   rules: DEFAULTS,
+  cluster: (prompt, signal) => model(prompt, signal),
   note: () => {},
 });
 before(async () => {
@@ -283,6 +288,7 @@ async function holding(held: string[], answers: Recording = {}, { token }: { tok
     open: (url, signal) => openGitHub(url, { fetch: github, token, signal }),
     openOwner: (url, signal, listing) => openGitHubOwner(url, { fetch: github, token, signal }, listing),
     rules: DEFAULTS,
+    cluster: NO_MODEL,
     note: () => {},
   });
   const address = await listen(server, 0);
@@ -516,6 +522,7 @@ test('a broken rules file → 422 and nothing is fetched', async (t) => {
     open: (url) => openGitHub(url, { fetch: (url) => (fetched.push(url), replay(RECORDING, noHistory())(url)) }),
     openOwner: (url) => openGitHubOwner(url, { fetch: (url) => (fetched.push(url), replay(RECORDING, noHistory())(url)) }),
     rules: { load: async () => ({ path: '/rules.yaml', text: 'version: 2\n' }), peek: async () => ({}) },
+    cluster: NO_MODEL,
     note: () => {},
   });
   const address = await listen(broken, 0);
@@ -743,6 +750,7 @@ test('the page: a repository already in the catalog keeps its skills when a new 
     open: (url) => openGitHub(url, { fetch: replay(failing ? failed : RECORDING, noHistory()) }),
     openOwner: (url) => openGitHubOwner(url, { fetch: replay(RECORDING, noHistory()) }),
     rules: DEFAULTS,
+    cluster: NO_MODEL,
     note: () => {},
   });
   const address = await listen(flaky, 0);
@@ -1142,4 +1150,202 @@ test('the page: open warnings stay open, and a focused card keeps the focus, as 
   server.release(held);
   await until(() => !p.$('[aria-busy]'));
   assert.equal((p.$('#repositories > [data-repository="acme/tools"] .alert-warn') as HTMLDetailsElement).open, true);
+});
+
+// By topic: spec/clustering.md
+
+const REVIEW_ID = 'acme/tools:.claude/skills/review/SKILL.md';
+const DEPLOY_ID = 'acme/tools:skills/deploy/SKILL.md';
+const BROKEN_ID = 'acme/tools:.claude/skills/broken/SKILL.md';
+const TRIAGE_ID = 'acme/other:.claude/skills/triage/SKILL.md';
+
+/** The model for one test: it answers these topics and keeps the skills it was asked about. */
+function topicsModel(t: { after(fn: () => void): void }, answer: [string, string[]][] | Ask) {
+  const asked: { id: string; name: string; description: string; body: string }[][] = [];
+  model = typeof answer === 'function' ? answer : async (prompt) => {
+    asked.push(JSON.parse(prompt.slice(prompt.indexOf('Skills (JSON):') + 'Skills (JSON):'.length)));
+    return JSON.stringify(answer.map(([topic, skills]) => ({ topic, skills })));
+  };
+  t.after(() => (model = NO_MODEL));
+  return asked;
+}
+
+function cluster(body: unknown, headers: Record<string, string> = { 'Content-Type': 'application/json' }) {
+  return fetch(`${base}api/cluster`, { method: 'POST', headers, body: typeof body === 'string' ? body : JSON.stringify(body) });
+}
+
+test('POST /api/cluster: the skills sent, in topics, the largest first; each in one', async (t) => {
+  const asked = topicsModel(t, [['Ops', ['b']], ['Code', ['a', 'c', 'unknown']]]);
+  const skills = ['a', 'b', 'c'].map((id) => ({ id, name: id, description: `${id}.`, body: `Body of ${id}.` }));
+  const response = await cluster({ skills });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-security-policy')?.includes("script-src 'self'"), true);
+  assert.deepEqual(await response.json(), { clusters: [{ topic: 'Code', skills: ['a', 'c'] }, { topic: 'Ops', skills: ['b'] }] });
+  assert.deepEqual(asked, [skills]);
+});
+
+test('POST /api/cluster: JSON only, POST only, its shape, each id once; a model that fails → 422 with its message', async (t) => {
+  topicsModel(t, async () => {
+    throw new AtlasError('Clustering failed: claude: Not logged in');
+  });
+  const one = { skills: [{ id: 'a', name: 'a', description: '', body: '' }] };
+  assert.equal((await cluster(one, { 'Content-Type': 'text/plain' })).status, 415);
+  assert.equal((await cluster(one, {})).status, 415);
+  assert.equal((await fetch(`${base}api/cluster`)).status, 405);
+  for (const body of ['not json', {}, { skills: {} }, { skills: [{ id: 'a' }] }, { skills: [one.skills[0], one.skills[0]] }]) {
+    const response = await cluster(body);
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.deepEqual(await response.json(), { error: 'Send { skills: [{ id, name, description, body }] }' });
+  }
+  const failed = await cluster(one);
+  assert.equal(failed.status, 422);
+  assert.deepEqual(await failed.json(), { error: 'Clustering failed: claude: Not logged in' });
+  // No skills: no question, no topics.
+  assert.deepEqual(await (await cluster({ skills: [] })).json(), { clusters: [] });
+  const large = await cluster({ skills: [{ id: 'a', name: 'a', description: '', body: 'x'.repeat(9 * 1024 * 1024) }] });
+  assert.equal(large.status, 413);
+});
+
+test('POST /api/cluster: a page that goes away drops the question', async (t) => {
+  let dropped = false;
+  let asked = false;
+  topicsModel(t, (_prompt, signal) => {
+    asked = true;
+    return new Promise((_resolve, reject) => signal?.addEventListener('abort', () => {
+      dropped = true;
+      reject(signal.reason);
+    }));
+  });
+  const controller = new AbortController();
+  const request = fetch(`${base}api/cluster`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skills: [{ id: 'a', name: 'a', description: '', body: '' }] }),
+    signal: controller.signal,
+  }).catch(() => undefined);
+  await until(() => asked);
+  controller.abort();
+  await request;
+  await until(() => dropped);
+});
+
+test('the page: Group by topic groups the cards by topic, each naming its repository; Show by repository goes back', async (t) => {
+  const asked = topicsModel(t, [['Shipping', [DEPLOY_ID]], ['Collaboration', [REVIEW_ID, TRIAGE_ID, BROKEN_ID]]]);
+  const p = await page();
+  await p.scan('github.com/acme/tools');
+  await p.scan('github.com/acme/other');
+  const button = p.$('#group') as HTMLButtonElement;
+  assert.equal(button.textContent, 'Group by topic');
+  assert.equal(button.getAttribute('aria-pressed'), 'false');
+  button.click();
+  await until(() => p.all('.topic').length > 0);
+  assert.deepEqual(p.texts('.topic-name'), ['Collaboration', 'Shipping']);
+  assert.deepEqual(p.texts('.topic .badge'), ['3 skills', '1 skill']);
+  assert.deepEqual(p.texts('[data-topic="Collaboration"] .card-title'), ['broken', 'review', 'triage']);
+  assert.deepEqual(p.texts('[data-topic="Collaboration"] .card-repository'), ['acme/tools', 'acme/tools', 'acme/other']);
+  assert.equal(p.$('.repository'), null);
+  assert.equal(button.textContent, 'Show by repository');
+  assert.equal(button.getAttribute('aria-pressed'), 'true');
+  // Every skill once, with the text of its body.
+  assert.deepEqual(asked[0].map((skill) => skill.id), [BROKEN_ID, DEPLOY_ID, REVIEW_ID, TRIAGE_ID]);
+  const review = asked[0].find((skill) => skill.id === REVIEW_ID)!;
+  assert.equal(review.description, 'Review pull requests the way this team does. Use before every merge.');
+  assert.match(review.body, /^Review\n+<script>alert\('raw html'\)<\/script>\n*See the guide, an anchor, bad and mail\.\nFrom the root/);
+  assert.doesNotMatch(review.body, /<p>|href=/);
+
+  // The filter narrows each topic; a card opens its skill, and Back returns to the topics.
+  p.filter('triage');
+  assert.deepEqual(p.texts('.card-title'), ['triage']);
+  assert.deepEqual(p.texts('.topic-name'), ['Collaboration']); // a topic with no card left is hidden
+  assert.deepEqual(p.texts('.topic .badge'), ['3 skills']);
+  p.filter('nothing matches');
+  assert.equal(p.text('#repositories'), 'No skill matches the filter.');
+  p.filter('');
+  (p.$(`[data-topic="Collaboration"] [data-skill="${REVIEW_ID}"]`) as HTMLAnchorElement).click();
+  await until(() => p.$('#skill-view')?.hidden === false);
+  assert.equal(p.text('#skill-view h1'), 'review');
+  (p.$('#skill-view .back') as HTMLButtonElement).click();
+  await until(() => !(p.$('#catalog-view') as HTMLElement).hidden);
+  assert.deepEqual(p.texts('.topic-name'), ['Collaboration', 'Shipping']);
+
+  button.click();
+  assert.equal(p.$('.topic'), null);
+  assert.deepEqual(p.texts('.repository-name'), ['acme/tools', 'acme/other']);
+  assert.equal(button.textContent, 'Group by topic');
+  assert.equal(asked.length, 1);
+});
+
+test('the page: a skill in two entries is sent once and shown once, in the first', async (t) => {
+  const asked = topicsModel(t, [['All', [REVIEW_ID, DEPLOY_ID, BROKEN_ID, TRIAGE_ID]]]);
+  const p = await page();
+  await p.scan('github.com/acme/tools');
+  await p.scan('github.com/acme');
+  (p.$('#group') as HTMLButtonElement).click();
+  await until(() => p.all('.topic').length > 0);
+  assert.deepEqual(asked[0].map((skill) => skill.id), [BROKEN_ID, DEPLOY_ID, REVIEW_ID, TRIAGE_ID]);
+  assert.equal(p.all(`[data-skill="${REVIEW_ID}"]`).length, 1);
+  assert.match(p.$(`[data-skill="${REVIEW_ID}"]`)?.getAttribute('href') ?? '', /^#in=https%3A%2F%2Fgithub\.com%2Facme%2Ftools&/);
+});
+
+test('the page: while the model is asked, the button says so; a failure is an error under the filter, the catalog by repository', async (t) => {
+  let fail: ((error: Error) => void) | undefined;
+  topicsModel(t, () => new Promise((_resolve, reject) => (fail = reject)));
+  const p = await page();
+  await p.scan('github.com/acme/tools');
+  const button = p.$('#group') as HTMLButtonElement;
+  button.click();
+  assert.equal(button.disabled, true);
+  assert.equal(button.textContent?.trim(), 'Grouping by topic…');
+  await until(() => fail !== undefined);
+  fail!(new AtlasError('Clustering needs Claude Code: claude was not found; install it, or set SKILL_ATLAS_CLAUDE'));
+  await until(() => !button.disabled);
+  assert.equal(p.text('#group-error'), 'Clustering needs Claude Code: claude was not found; install it, or set SKILL_ATLAS_CLAUDE');
+  assert.equal(p.$('#group-error')?.hidden, false);
+  assert.deepEqual(p.texts('.repository-name'), ['acme/tools']);
+  assert.equal(button.textContent, 'Group by topic');
+});
+
+test('the page: a new scan or Remove puts the catalog back by repository; no grouping while a scan goes on; not in the address', async (t) => {
+  topicsModel(t, [['All', [REVIEW_ID, DEPLOY_ID, BROKEN_ID, TRIAGE_ID]]]);
+  const held = 'https://api.github.com/repos/acme/other/commits/trunk';
+  const server = await holding([held]);
+  t.after(server.close);
+  const p = await page();
+  await p.scan('github.com/acme/tools');
+  const button = p.$('#group') as HTMLButtonElement;
+  button.click();
+  await until(() => p.all('.topic').length > 0);
+  const address = p.window.location.href;
+  assert.doesNotMatch(address, /topic|group/);
+  await p.scan('github.com/acme/other');
+  assert.equal(p.$('.topic'), null);
+  assert.deepEqual(p.texts('.repository-name'), ['acme/tools', 'acme/other']);
+
+  // Removed while the model is asked: the question is dropped, and its answer never shows.
+  let answer: ((text: string) => void) | undefined;
+  let dropped = false;
+  model = (_prompt, signal) => new Promise((resolve) => {
+    answer = resolve;
+    signal?.addEventListener('abort', () => (dropped = true));
+  });
+  button.click();
+  await until(() => answer !== undefined);
+  (p.$('[data-repository="acme/other"] .button-ghost') as HTMLButtonElement).click();
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, 'Group by topic');
+  await until(() => dropped);
+  answer!('[]');
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(p.$('.topic'), null);
+  assert.deepEqual(p.texts('.repository-name'), ['acme/tools']);
+
+  const slow = await page('', server.address);
+  await slow.scan('github.com/acme/tools');
+  (slow.$('#scan-url') as HTMLInputElement).value = 'github.com/acme/other';
+  (slow.$('#scan-form') as HTMLFormElement).requestSubmit();
+  await until(() => slow.$('[aria-busy]') !== null);
+  assert.equal((slow.$('#group') as HTMLButtonElement).disabled, true);
+  server.release(held);
+  await until(() => !slow.$('[aria-busy]'));
+  assert.equal((slow.$('#group') as HTMLButtonElement).disabled, false);
 });

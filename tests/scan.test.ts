@@ -182,7 +182,7 @@ test('--filter: no match is not an error; an empty text keeps every skill; given
 
   assert.equal((await atlas(['scan', '--filter', ' ', FIXTURE])).stdout, fixture.stdout);
 
-  const usage = 'Usage: skill-atlas scan [--rules <file>] [--filter <text>] <GitHub URL | directory>';
+  const usage = 'Usage: skill-atlas scan [--rules <file>] [--filter <text>] [--cluster] <GitHub URL | directory>';
   for (const args of [['--filter', 'a', '--filter', 'b', FIXTURE], [FIXTURE, '--filter']]) {
     const wrong = await atlas(['scan', ...args]);
     assert.equal(wrong.code, 1);

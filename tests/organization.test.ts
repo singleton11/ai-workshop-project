@@ -340,5 +340,5 @@ test('the browser terminal scans an organization too', async () => {
 });
 
 test('help says an organization can be scanned', async () => {
-  assert.match((await atlas(['help'])).stdout, /scan \[--rules <file>\] \[--filter <text>\] <GitHub URL \| directory>\s+find every skill in a repository or organization/);
+  assert.match((await atlas(['help'])).stdout, /scan \[--rules <file>\] \[--filter <text>\] \[--cluster\] <GitHub URL \| directory>\s+find every skill in a repository or organization/);
 });

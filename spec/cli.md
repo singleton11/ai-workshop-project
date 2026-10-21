@@ -1,9 +1,11 @@
 # Command line
-`./skill-atlas scan [--rules <file>] [--filter <text>] <GitHub URL | directory>`: a repository, or
+`./skill-atlas scan [--rules <file>] [--filter <text>] [--cluster] <GitHub URL | directory>`: a repository, or
 with `https://github.com/<owner>`, every repository of an [organization](analysis.md#an-organization).
 `--filter <text>` keeps the skills whose name, description or path contains the text, in any letter
 case, as the [web](web.md) filter box does; the first line says `N of M skills`. No match is not an
 error: `0 of M skills`, exit code 0. Warnings are not filtered. An empty text keeps every skill.
+`--cluster` groups the skills by topic, with `claude -p` and a small model: [clustering](clustering.md),
+[below](#by-topic).
 `./skill-atlas rules [--defaults]`: the rules file's path and content, or the current defaults.
 `…/tree/<commit | branch | tag>` scans that ref instead of the default branch, always through the
 file tree: code search sees only the default branch. An unknown ref → a clear message, exit code 1.
@@ -40,3 +42,23 @@ JetBrains/kotlin · 6 skills
 
 With `--filter`, the organization totals and repository blocks count only matching skills; repositories
 with no matches are omitted. Warnings and the total number of listed repositories are not filtered.
+
+## By topic
+
+With `--cluster`, the first line is the same; then each topic, after an empty line, as
+`## <topic> · N skills`, and its skills as above. `--filter` comes first: only the matching skills
+are clustered, and with none, the model is not asked. An organization's skills are clustered
+together: a topic can hold skills of several repositories, each with its own link.
+```
+anthropics/skills · 19 skills
+
+## File Formats · 4 skills
+docx — Use this skill whenever the user wants to create, read, edit, or manipulate Word documents…
+  updated 2026-07-17 · https://github.com/anthropics/skills/blob/<commit>/skills/docx/SKILL.md
+…
+
+## Web Development · 4 skills
+…
+```
+A scan that stopped partway clusters the skills it read, then fails as usual. Clustering that fails
+([clustering](clustering.md#claude-code)) prints nothing but its error, exit code 1.

@@ -18,6 +18,15 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
   number of skills and the scanned commit. Scanning a repository again replaces its skills.
   Each repository can be removed.
 - A filter box narrows the cards by name, description or path, in any letter case.
+- **Group by topic**, next to the filter, groups the catalog's cards by topic instead of by
+  repository: a small model names the topics ([clustering](clustering.md)). Each topic shows its
+  name, `N skills` and its cards, the largest first; each card also names its repository. Every
+  skill in the catalog is sent once: a skill in two entries is in the first one. While the server
+  asks the model, the button says `Grouping by topic…`; then *Show by repository* goes back. The
+  filter narrows the cards in each topic too; a topic with none left is hidden. It can be pressed only while no scan is going on; a
+  new scan or *Remove* puts the catalog back by repository, as the topics were those of the catalog
+  before. A failure is an error under the filter, and the catalog stays by repository. The topics
+  are not in the address: a reload shows the catalog by repository.
 - An organization is **one entry**: its name, `N skills in M of K repositories`, its warnings, then
   each repository with skills, as above, inside it. It is removed as a whole, and scanning it again
   replaces it. A repository of it scanned on its own as well is another entry.
@@ -110,3 +119,11 @@ cancelled, and no repository of an organization still waiting its turn is opened
 stops: the server goes on, and so do the other pages' scans, even when skills' dates are being read.
 A bad or missing URL, or a local path → `400 { error }`; any other failure the CLI explains
 (not found, rate limit, broken rules file) → `422 { error }`, with the CLI's message.
+
+`POST /api/cluster`, with `Content-Type: application/json` and `{ skills: [{ id, name, description, body }] }`
+(each a string, each id once) → `200 { clusters: [{ topic, skills: [<id>] }] }`: the
+[clustering](clustering.md#the-answer), largest topic first. JSON only, so that a page elsewhere
+cannot send it without asking first (CORS), which this server never allows: another
+`Content-Type` → `415`. Not a `POST` → `405`; a body of another shape → `400 { error }`; over 8 MiB
+→ `413`. Clustering that fails → `422 { error }`, with the CLI's message. A page that goes away
+before the answer stops the model's process.

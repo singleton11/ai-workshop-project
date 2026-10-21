@@ -1,5 +1,6 @@
 // The skill-atlas commands. The same code serves the Node CLI and the browser
 // terminal: everything that differs between them comes in through the context.
+import { clusterSkills, type Ask } from './core/cluster.ts';
 import { AtlasError } from './core/errors.ts';
 import { skillLink, updatedDay, type Repository, type Skill } from './core/model.ts';
 import { scanOrganization, type Organization, type OrganizationResult } from './core/organization.ts';
@@ -23,13 +24,16 @@ export type Context = {
   rules: RulesStore;
   /** Starts the web interface and returns its address; only the Node CLI has one. spec/web.md. */
   serve?(port: number): Promise<string>;
+  /** Asks the model that groups skills by topic; only the Node CLI has one. spec/clustering.md. */
+  cluster?: Ask;
 };
 
 const usage = `Usage: skill-atlas <command>
 
-  scan [--rules <file>] [--filter <text>] <GitHub URL | directory>
+  scan [--rules <file>] [--filter <text>] [--cluster] <GitHub URL | directory>
                                   find every skill in a repository or organization; --filter keeps
-                                  skills whose name, description or path contains the text
+                                  skills whose name, description or path contains the text;
+                                  --cluster groups them by topic, with claude -p and a small model
   rules [--defaults]              show the rules file: what is a skill, and what is not
   serve [--port <n>]              open the catalog in a browser, at http://localhost:4173/
   help                            show this help`;
@@ -52,26 +56,32 @@ export async function run(args: string[], context: Context): Promise<number> {
 }
 
 async function scanCommand(args: string[], context: Context) {
-  const usage = 'Usage: skill-atlas scan [--rules <file>] [--filter <text>] <GitHub URL | directory>';
+  const usage = 'Usage: skill-atlas scan [--rules <file>] [--filter <text>] [--cluster] <GitHub URL | directory>';
   let explicit: string | undefined;
   let filter: string | undefined;
+  let cluster = false;
   const inputs: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--rules' && i + 1 < args.length && explicit === undefined) explicit = args[++i];
     else if (args[i] === '--filter' && i + 1 < args.length && filter === undefined) filter = args[++i];
-    else if (args[i] === '--rules' || args[i] === '--filter') throw new AtlasError(usage);
+    else if (args[i] === '--cluster' && !cluster) cluster = true;
+    else if (args[i] === '--rules' || args[i] === '--filter' || args[i] === '--cluster') throw new AtlasError(usage);
     else inputs.push(args[i]);
   }
   if (inputs.length !== 1) throw new AtlasError(usage);
+  const ask = cluster ? context.cluster : undefined;
+  if (cluster && !ask) throw new AtlasError('--cluster runs only from the command line');
   // The rules first: a broken rules file stops the scan before anything is fetched.
   const file = await context.rules.load(explicit, context.error);
   const rules = parseRules(file.text, file.path);
   const text = filter?.trim().toLowerCase() ?? '';
   const opened = await context.open(inputs[0]);
-  if ('repositories' in opened) return printOrganization(await scanOrganization(opened, rules), context, text);
+  if ('repositories' in opened) return printOrganization(await scanOrganization(opened, rules), context, text, ask);
   const result = await scan(opened, rules);
   const skills = text ? result.skills.filter((skill) => matches(skill, text)) : result.skills;
-  printRepository(result.repository, skills, text ? result.skills.length : undefined, context);
+  // Grouped before anything is printed: a clustering that fails prints nothing but its error.
+  const topics = ask && (await topicsOf(skills.map((skill) => ({ repository: result.repository, skill })), ask));
+  printRepository(result.repository, skills, text ? result.skills.length : undefined, context, topics);
   for (const warning of result.warnings) context.error(`warning: ${warning}`);
   // What was read before the scan stopped is printed above; the error still makes it a failure.
   if (result.error !== undefined) throw new AtlasError(`scan incomplete: ${result.error}`);
@@ -105,14 +115,44 @@ function matches(skill: Skill, text: string): boolean {
  * `<owner>/<repo> · N skills` (`N of M skills` when filtered), then each skill's name and first
  * sentence; when it last changed, if that is known, and its link.
  */
-function printRepository(repository: Repository, skills: Skill[], total: number | undefined, { print }: Context) {
+function printRepository(repository: Repository, skills: Skill[], total: number | undefined, context: Context, topics?: Topic[]) {
   const count = total === undefined ? `${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}` : `${skills.length} of ${total} skills`;
-  print(`${repository.id} · ${count}`);
-  for (const skill of skills) {
-    print(skill.description ? `${skill.name} — ${firstSentence(skill.description)}` : skill.name);
-    const day = updatedDay(skill);
-    print(`  ${day ? `updated ${day} · ` : ''}${skillLink(repository, skill)}`);
-    if (skill.copies.length > 0) print(`  also in ${skill.copies.join(', ')}`);
+  context.print(`${repository.id} · ${count}`);
+  if (topics) printTopics(topics, context);
+  else for (const skill of skills) printSkill(repository, skill, context);
+}
+
+/** Its name and first sentence; when it last changed, if that is known, and its link; its copies. */
+function printSkill(repository: Repository, skill: Skill, { print }: Context) {
+  print(skill.description ? `${skill.name} — ${firstSentence(skill.description)}` : skill.name);
+  const day = updatedDay(skill);
+  print(`  ${day ? `updated ${day} · ` : ''}${skillLink(repository, skill)}`);
+  if (skill.copies.length > 0) print(`  also in ${skill.copies.join(', ')}`);
+}
+
+/** A skill and the repository it is in: an organization's topics mix repositories. */
+type Listed = { repository: Repository; skill: Skill };
+
+/** A topic and its skills, by name, then id. */
+type Topic = { topic: string; skills: Listed[] };
+
+/** The skills, grouped by the model: the largest topic first. spec/clustering.md. */
+async function topicsOf(listed: Listed[], ask: Ask): Promise<Topic[]> {
+  const byId = new Map(listed.map((entry) => [entry.skill.id, entry]));
+  const clusters = await clusterSkills(listed.map(({ skill }) => skill), ask);
+  const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  return clusters.map(({ topic, skills }) => ({
+    topic,
+    skills: skills.map((id) => byId.get(id)!).sort((a, b) => compare(a.skill.name, b.skill.name) || compare(a.skill.id, b.skill.id)),
+  }));
+}
+
+/** After an empty line, `## <topic> · N skills`, then its skills. */
+function printTopics(topics: Topic[], context: Context) {
+  for (const { topic, skills } of topics) {
+    context.print('');
+    context.print(`## ${topic} · ${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}`);
+    for (const { repository, skill } of skills) printSkill(repository, skill, context);
   }
 }
 
@@ -120,7 +160,7 @@ function printRepository(repository: Repository, skills: Skill[], total: number 
  * `<owner> · N skills in M of K repositories`, then each repository with skills, as for one; then
  * `scan incomplete: <owner>/<repo>: <message>` for each repository that stopped partway.
  */
-function printOrganization(result: OrganizationResult, context: Context, filter = '') {
+async function printOrganization(result: OrganizationResult, context: Context, filter = '', ask?: Ask) {
   const repositories = result.repositories
     .map((scanResult) => ({
       scanResult,
@@ -128,8 +168,12 @@ function printOrganization(result: OrganizationResult, context: Context, filter 
     }))
     .filter(({ skills }) => skills.length > 0);
   const skills = repositories.reduce((sum, repository) => sum + repository.skills.length, 0);
+  // One set of topics for the whole organization, its repositories mixed.
+  const topics = ask && (await topicsOf(repositories.flatMap(({ scanResult, skills }) =>
+    skills.map((skill) => ({ repository: scanResult.repository, skill }))), ask));
   context.print(`${result.owner.id} · ${organizationSummary(skills, repositories.length, result.listed)}`);
-  for (const { scanResult, skills } of repositories) {
+  if (topics) printTopics(topics, context);
+  else for (const { scanResult, skills } of repositories) {
     context.print('');
     printRepository(scanResult.repository, skills, filter ? scanResult.skills.length : undefined, context);
   }

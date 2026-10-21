@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { run, type RulesStore } from '../src/commands.ts';
+import type { Ask } from '../src/core/cluster.ts';
 import { openGitHub, openGitHubOwner, parseGitHubOwnerUrl, parseGitHubUrl, type Fetch } from '../src/core/github.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { DEFAULT_RULES } from '../src/core/rules.ts';
@@ -90,6 +91,13 @@ export type AtlasOptions = {
   fetch?: Fetch;
   /** A local folder's dates are the machine's (its Git history, its file times), so they are taken out unless kept. */
   localDates?: boolean;
+  /** The model `--cluster` asks; none by default, so a test that clusters by mistake fails. */
+  cluster?: Ask;
+};
+
+/** No model: a test that is not about clustering never asks one. */
+export const NO_MODEL: Ask = async () => {
+  throw new Error('no model in this test');
 };
 
 /** The default rules, in memory, so nothing is written; `--rules` still reads its file. */
@@ -115,6 +123,7 @@ export async function atlas(args: string[], options: AtlasOptions = {}) {
     print: (text) => stdout.push(text),
     error: (text) => stderr.push(text),
     rules: options.rules ?? DEFAULTS,
+    cluster: options.cluster ?? NO_MODEL,
   });
   const printed = stdout.join('\n');
   return { code, stdout: local && !options.localDates ? withoutDates(printed) : printed, stderr: stderr.join('\n') };

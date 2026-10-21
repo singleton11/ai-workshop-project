@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { firstSentence, type RulesStore } from '../commands.ts';
+import { clusterSkills, type Ask, type ClusterInput } from '../core/cluster.ts';
 import { AtlasError } from '../core/errors.ts';
 import { parseGitHubOwnerUrl, parseGitHubUrl } from '../core/github.ts';
 import { skillLink, type Repository, type Skill } from '../core/model.ts';
@@ -21,6 +22,8 @@ export type WebOptions = {
    */
   openOwner(url: string, signal: AbortSignal, listing?: (progress: OwnerListing) => void): Promise<Organization>;
   rules: RulesStore;
+  /** Asks the model that groups skills by topic; once `signal` is aborted, the question is dropped. */
+  cluster: Ask;
   /** Where the rules file's notes go: the server's stderr. */
   note(text: string): void;
 };
@@ -64,6 +67,7 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
   // Only the page itself, not another site through a name that points here.
   if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(request.headers.host ?? '')) return send(response, 403, { error: 'Forbidden' });
   const url = new URL(request.url ?? '/', 'http://localhost');
+  if (url.pathname === '/api/cluster') return clusterRequest(request, response, options.cluster);
   if (request.method !== 'GET' && request.method !== 'HEAD') return send(response, 405, { error: 'Method not allowed' });
   if (url.pathname === '/api/scan') {
     const stream = /\bapplication\/x-ndjson\b/.test(request.headers.accept ?? '');
@@ -108,6 +112,57 @@ async function scanRequest(input: string, stream: boolean, response: ServerRespo
     if (!(error instanceof AtlasError)) throw error;
     send(response, 422, { error: error.message });
   }
+}
+
+/** The most a page may send to be clustered: a large organization's skills, bodies and all. */
+const CLUSTER_LIMIT = 8 * 1024 * 1024;
+
+/**
+ * `POST /api/cluster`, the skills as JSON: their topics. JSON only, so a page elsewhere cannot send
+ * one without asking first, and this server never says yes. A page that goes away drops the question.
+ */
+async function clusterRequest(request: IncomingMessage, response: ServerResponse, ask: Ask) {
+  if (request.method !== 'POST') return send(response, 405, { error: 'Method not allowed' });
+  if (!/^application\/json\s*(;|$)/i.test(request.headers['content-type'] ?? '')) {
+    return send(response, 415, { error: 'Send the skills as application/json' });
+  }
+  let text = '';
+  for await (const chunk of request) {
+    text += chunk;
+    if (text.length > CLUSTER_LIMIT) {
+      response.setHeader('Connection', 'close');
+      return send(response, 413, { error: 'Too many skills to cluster at once' });
+    }
+  }
+  const skills = clusterInputs(text);
+  if (!skills) return send(response, 400, { error: 'Send { skills: [{ id, name, description, body }] }' });
+  const gone = new AbortController();
+  response.once('close', () => {
+    if (!response.writableFinished) gone.abort();
+  });
+  try {
+    send(response, 200, { clusters: await clusterSkills(skills, ask, gone.signal) });
+  } catch (error) {
+    if (gone.signal.aborted) return void response.destroy(); // no one to answer
+    if (!(error instanceof AtlasError)) throw error;
+    send(response, 422, { error: error.message });
+  }
+}
+
+/** `{ skills: [{ id, name, description, body }] }`, each a string, each id once; else nothing. */
+function clusterInputs(text: string): ClusterInput[] | undefined {
+  let value: { skills?: unknown };
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const skills = value?.skills;
+  if (!Array.isArray(skills)) return undefined;
+  const fields = ['id', 'name', 'description', 'body'] as const;
+  if (!skills.every((skill) => typeof skill === 'object' && skill !== null && fields.every((field) => typeof skill[field] === 'string'))) return undefined;
+  if (new Set(skills.map((skill) => skill.id)).size !== skills.length) return undefined;
+  return skills.map((skill) => Object.fromEntries(fields.map((field) => [field, skill[field]])) as ClusterInput);
 }
 
 type Line = (body: unknown) => void;
