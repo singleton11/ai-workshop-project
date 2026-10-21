@@ -23,7 +23,12 @@ export type Context = {
   rules: RulesStore;
   /** Starts the web interface and returns its address; only the Node CLI has one. spec/web.md. */
   serve?(port: number): Promise<string>;
+  /** Set when `print` goes to a terminal: the list is laid out for reading there. spec/cli.md. */
+  terminal?: Terminal;
 };
+
+/** A terminal `columns` wide; `color`, unless `NO_COLOR` or `TERM=dumb` say otherwise. */
+export type Terminal = { columns: number; color: boolean };
 
 const usage = `Usage: skill-atlas <command>
 
@@ -103,17 +108,48 @@ function matches(skill: Skill, text: string): boolean {
 
 /**
  * `<owner>/<repo> · N skills` (`N of M skills` when filtered), then each skill's name and first
- * sentence; when it last changed, if that is known, and its link.
+ * sentence; when it last changed, if that is known, and its link. In a terminal, an empty line
+ * before each skill, the line with the name cut to the terminal's width, and colors.
  */
-function printRepository(repository: Repository, skills: Skill[], total: number | undefined, { print }: Context) {
+function printRepository(repository: Repository, skills: Skill[], total: number | undefined, { print, terminal }: Context) {
   const count = total === undefined ? `${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}` : `${skills.length} of ${total} skills`;
-  print(`${repository.id} · ${count}`);
+  const style = styles(terminal);
+  print(`${style.bold(repository.id)} ${style.dim(`· ${count}`)}`);
   for (const skill of skills) {
-    print(skill.description ? `${skill.name} — ${firstSentence(skill.description)}` : skill.name);
+    if (terminal) print('');
+    print(nameLine(skill, terminal, style));
     const day = updatedDay(skill);
-    print(`  ${day ? `updated ${day} · ` : ''}${skillLink(repository, skill)}`);
-    if (skill.copies.length > 0) print(`  also in ${skill.copies.join(', ')}`);
+    print(`  ${style.dim(`${day ? `updated ${day} · ` : ''}${skillLink(repository, skill)}`)}`);
+    if (skill.copies.length > 0) print(`  ${style.dim(`also in ${skill.copies.join(', ')}`)}`);
   }
+}
+
+const plain = (text: string) => text;
+
+/** ANSI colors in a terminal that has them; elsewhere, the text as it is. */
+function styles(terminal: Terminal | undefined) {
+  if (!terminal?.color) return { bold: plain, dim: plain, name: plain };
+  const sgr = (code: string) => (text: string) => `\x1b[${code}m${text}\x1b[0m`;
+  return { bold: sgr('1'), dim: sgr('2'), name: sgr('1;36') };
+}
+
+/**
+ * `<name> — <first sentence>`, or the name alone without a description. In a terminal, cut to its
+ * width: the sentence first; a name with no room left for any of it, the name alone, cut too.
+ */
+function nameLine(skill: Skill, terminal: Terminal | undefined, style: ReturnType<typeof styles>): string {
+  const summary = skill.description ? firstSentence(skill.description) : '';
+  if (!terminal) return summary ? `${skill.name} — ${summary}` : skill.name;
+  const room = terminal.columns - [...skill.name].length - 3;
+  if (!summary || room < 1) return style.name(fit(skill.name, terminal.columns));
+  return `${style.name(skill.name)} — ${fit(summary, room)}`;
+}
+
+/** The text, cut to `width` characters (at least 1) with `…` if longer. */
+function fit(text: string, width: number): string {
+  const characters = [...text];
+  if (characters.length <= width) return text;
+  return `${characters.slice(0, Math.max(width, 1) - 1).join('').trimEnd()}…`;
 }
 
 /**
@@ -128,7 +164,8 @@ function printOrganization(result: OrganizationResult, context: Context, filter 
     }))
     .filter(({ skills }) => skills.length > 0);
   const skills = repositories.reduce((sum, repository) => sum + repository.skills.length, 0);
-  context.print(`${result.owner.id} · ${organizationSummary(skills, repositories.length, result.listed)}`);
+  const style = styles(context.terminal);
+  context.print(`${style.bold(result.owner.id)} ${style.dim(`· ${organizationSummary(skills, repositories.length, result.listed)}`)}`);
   for (const { scanResult, skills } of repositories) {
     context.print('');
     printRepository(scanResult.repository, skills, filter ? scanResult.skills.length : undefined, context);

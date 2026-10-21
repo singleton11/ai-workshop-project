@@ -95,6 +95,33 @@ const ACME_OUTPUT = [
   `  https://github.com/acme/tools/blob/${TOOLS}/.claude/skills/review/SKILL.md`,
 ].join('\n');
 
+test('an organization in a terminal: its totals line in bold and dimmed, each repository laid out as for one', async () => {
+  const result = await atlas(['scan', 'https://github.com/acme'], { recording: ACME, token: undefined, terminal: { columns: 120, color: true } });
+  assert.equal(result.code, 0, result.stderr);
+  const dim = (text: string) => `\x1b[2m${text}\x1b[0m`;
+  assert.equal(
+    result.stdout,
+    [
+      `\x1b[1macme\x1b[0m ${dim('· 3 skills in 2 of 5 repositories')}`,
+      '',
+      `\x1b[1macme/Other\x1b[0m ${dim('· 1 skill')}`,
+      '',
+      '\x1b[1;36mtriage\x1b[0m — Sort new issues.',
+      `  ${dim(`https://github.com/acme/Other/blob/${OTHER}/.claude/skills/triage/SKILL.md`)}`,
+      '',
+      `\x1b[1macme/tools\x1b[0m ${dim('· 2 skills')}`,
+      '',
+      '\x1b[1;36mdeploy\x1b[0m — Ship to production.',
+      `  ${dim(`https://github.com/acme/tools/blob/${TOOLS}/skills/deploy/SKILL.md`)}`,
+      '',
+      '\x1b[1;36mreview\x1b[0m — Review pull requests.',
+      `  ${dim(`https://github.com/acme/tools/blob/${TOOLS}/.claude/skills/review/SKILL.md`)}`,
+    ].join('\n'),
+  );
+  // Warnings go to stderr as they are.
+  assert.doesNotMatch(result.stderr, /\x1b/);
+});
+
 test('https://github.com/<owner> is an organization; …/<owner>/<repo> is still a repository', () => {
   for (const url of ['https://github.com/acme', 'github.com/acme/', 'http://www.github.com/acme', ' github.com/acme ']) {
     assert.deepEqual(parseGitHubOwnerUrl(url), { owner: 'acme' }, url);

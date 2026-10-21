@@ -3,7 +3,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { run, type RulesStore } from '../src/commands.ts';
+import { run, type RulesStore, type Terminal } from '../src/commands.ts';
 import { openGitHub, openGitHubOwner, parseGitHubOwnerUrl, parseGitHubUrl, type Fetch } from '../src/core/github.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { DEFAULT_RULES } from '../src/core/rules.ts';
@@ -88,6 +88,8 @@ export type AtlasOptions = {
   rules?: RulesStore;
   /** GitHub itself, instead of the recordings. */
   fetch?: Fetch;
+  /** As the CLI is when its output is a terminal; a pipe by default. */
+  terminal?: Terminal;
   /** A local folder's dates are the machine's (its Git history, its file times), so they are taken out unless kept. */
   localDates?: boolean;
 };
@@ -115,6 +117,7 @@ export async function atlas(args: string[], options: AtlasOptions = {}) {
     print: (text) => stdout.push(text),
     error: (text) => stderr.push(text),
     rules: options.rules ?? DEFAULTS,
+    terminal: options.terminal,
   });
   const printed = stdout.join('\n');
   return { code, stdout: local && !options.localDates ? withoutDates(printed) : printed, stderr: stderr.join('\n') };
