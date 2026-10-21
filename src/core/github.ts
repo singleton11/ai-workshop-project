@@ -63,8 +63,10 @@ async function openRepository(
 ): Promise<Source> {
   const id = info.full_name;
   const commit = ref ?? info.default_branch;
+  // GitHub answers an unknown ref with a 422 ("No commit found for SHA"), not a 404.
+  const notFound = ref ? `Branch, tag or commit not found: ${ref} in https://github.com/${id}` : `Not found in ${id}: ${commit}`;
   const { sha } = await github
-    .json<{ sha: string }>(`${API}/repos/${id}/commits/${encodePath(commit)}`, `Not found in ${id}: ${commit}`)
+    .json<{ sha: string }>(`${API}/repos/${id}/commits/${encodePath(commit)}`, notFound, [404, 422])
     .catch((error: unknown) => {
       throw error instanceof EmptyRepository ? new EmptyRepository(`Repository is empty: https://github.com/${id}`) : error;
     });
@@ -321,13 +323,13 @@ function client({ fetch, token, signal }: GitHubOptions) {
     }
   }
 
-  async function request(url: string, notFound: string): Promise<unknown> {
+  async function request(url: string, notFound: string, notFoundStatuses: number[]): Promise<unknown> {
     const response = await get(url, { headers });
     if (response.ok) return content(url, () => response.json());
     const body: unknown = await response.json().catch(() => undefined);
     const message = (body as { message?: unknown } | undefined)?.message;
     const text = typeof message === 'string' ? message : '';
-    if (response.status === 404) throw new AtlasError(notFound);
+    if (notFoundStatuses.includes(response.status)) throw new AtlasError(notFound);
     if ((response.status === 403 || response.status === 429) && /rate limit/i.test(text)) {
       throw new GitHubUnavailable(`GitHub rate limit reached; ${token ? 'try again in a minute' : 'set GITHUB_TOKEN'}`);
     }
@@ -339,9 +341,9 @@ function client({ fetch, token, signal }: GitHubOptions) {
   return {
     /** With a token, code search can be used. */
     token,
-    /** A GitHub API answer; `notFound` explains a 404. */
-    json<T>(url: string, notFound = `Not found on GitHub: ${url}`): Promise<T> {
-      if (!answers.has(url)) answers.set(url, request(url, notFound));
+    /** A GitHub API answer; `notFound` explains a 404, or another of `notFoundStatuses`. */
+    json<T>(url: string, notFound = `Not found on GitHub: ${url}`, notFoundStatuses = [404]): Promise<T> {
+      if (!answers.has(url)) answers.set(url, request(url, notFound, notFoundStatuses));
       return answers.get(url) as Promise<T>;
     },
     /** A file's bytes at the scanned commit, or undefined if it is not there. */
