@@ -77,6 +77,7 @@ const RECORDING: Recording = {
   [`https://api.github.com/repos/acme/other/git/trees/${OTHER}?recursive=1`]: tree(['.claude/skills/triage/SKILL.md']),
   ...raw('acme/other', OTHER, '.claude/skills/triage/SKILL.md', '---\nname: triage\ndescription: Sort new issues.\n---\nSteps.\n'),
   'https://api.github.com/repos/acme/missing': { status: 404, body: { message: 'Not Found' } },
+  'https://api.github.com/repos/acme/tools/commits/no-such-ref': { status: 422, body: { message: 'No commit found for SHA: no-such-ref' } },
   // acme/flaky: GitHub fails on one of its two skills; at tag v2, on its only one.
   'https://api.github.com/repos/acme/flaky': { status: 200, body: { full_name: 'acme/flaky', default_branch: 'main' } },
   'https://api.github.com/repos/acme/flaky/commits/main': { status: 200, body: { sha: FLAKY } },
@@ -242,6 +243,10 @@ test('a missing or bad URL, or a local directory → 400; what the CLI explains 
   assert.deepEqual(await api(FIXTURE), { status: 400, body: { error: `Not a GitHub repository or organization URL: ${FIXTURE}` } });
   assert.deepEqual(await api('https://gitlab.com/a/b'), { status: 400, body: { error: 'Not a GitHub repository or organization URL: https://gitlab.com/a/b' } });
   assert.deepEqual(await api('github.com/acme/missing'), { status: 422, body: { error: 'Repository not found: https://github.com/acme/missing' } });
+  assert.deepEqual(await api('github.com/acme/tools/tree/no-such-ref'), {
+    status: 422,
+    body: { error: 'Branch, tag or commit not found: no-such-ref in https://github.com/acme/tools' },
+  });
 });
 
 test('a scan that stopped partway → 200, the skills read before it, and the error', async () => {
