@@ -73,7 +73,8 @@ async function scanCommand(args: string[], context: Context) {
     else if (args[i] === '--rules' || args[i] === '--filter' || args[i] === '--cluster') throw new AtlasError(usage);
     else inputs.push(args[i]);
   }
-  if (inputs.length !== 1) throw new AtlasError(usage);
+  // An empty input, as `scan "$URL"` gives with no URL, is no input: not the current directory.
+  if (inputs.length !== 1 || inputs[0] === '') throw new AtlasError(usage);
   const ask = cluster ? context.cluster : undefined;
   if (cluster && !ask) throw new AtlasError('--cluster runs only from the command line');
   // The rules first: a broken rules file stops the scan before anything is fetched.
