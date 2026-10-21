@@ -18,22 +18,30 @@ const API = 'https://api.github.com';
 const RAW = 'https://raw.githubusercontent.com';
 
 /**
- * `https://github.com/owner/repo`, with or without the scheme, a trailing slash or `.git`;
- * `…/tree/<ref>` pins a commit, a branch or a tag instead of the default branch.
+ * The URL without its query and fragment: `?tab=readme-ov-file` or `#readme`, as copied from GitHub's
+ * address bar, opens the same page.
+ */
+function withoutQuery(input: string): string {
+  return input.trim().replace(/[?#].*$/s, '');
+}
+
+/**
+ * `https://github.com/owner/repo`, with or without the scheme, a trailing slash or `.git`, a query or
+ * a fragment; `…/tree/<ref>` pins a commit, a branch or a tag instead of the default branch.
  */
 export function parseGitHubUrl(input: string): { owner: string; repo: string; ref?: string } | undefined {
   const match = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/tree\/([^?#]+?))?\/?$/i.exec(
-    input.trim(),
+    withoutQuery(input),
   );
   return match ? { owner: match[1], repo: match[2], ref: match[3] } : undefined;
 }
 
 /**
  * `https://github.com/owner`: an organization or a user, every repository it has. With or without
- * the scheme or a trailing slash.
+ * the scheme, a trailing slash, a query or a fragment.
  */
 export function parseGitHubOwnerUrl(input: string): { owner: string } | undefined {
-  const match = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/?$/i.exec(input.trim());
+  const match = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/?$/i.exec(withoutQuery(input));
   return match ? { owner: match[1] } : undefined;
 }
 

@@ -44,7 +44,7 @@ Web: a thin client too, [web.md](web.md).
 
 ## An organization
 
-`https://github.com/<owner>`, with or without the scheme or a trailing slash: every repository
+`https://github.com/<owner>`, with or without the scheme, a trailing slash, a query or a fragment: every repository
 the organization, or the user, owns is scanned, each as on its own, with the same rules.
 
 - Forks and archived repositories are left out: a fork's skills are its upstream's, an archived

@@ -7,6 +7,9 @@ error: `0 of M skills`, exit code 0. Warnings are not filtered. An empty text ke
 `--cluster` groups the skills by topic, with `claude -p` and a small model: [clustering](clustering.md),
 [below](#by-topic).
 `./skill-atlas rules [--defaults]`: the rules file's path and content, or the current defaults.
+A GitHub URL may be written with or without the scheme, `www.`, a trailing `/` (and `.git` for a
+repository); a query or a fragment, as copied from GitHub's address bar (`?tab=readme-ov-file`,
+`#readme`, `?tab=repositories`), is ignored: it is the same repository or organization.
 `…/tree/<commit | branch | tag>` scans that ref instead of the default branch, always through the
 file tree: code search sees only the default branch. An unknown ref → a clear message, exit code 1:
 `Branch, tag or commit not found: <ref> in https://github.com/<owner>/<repo>`.

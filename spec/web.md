@@ -9,6 +9,8 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
 
 - One input: paste a **GitHub repository** URL (`…/tree/<ref>` too), or an **organization**'s
   (`https://github.com/<owner>`, [what is scanned](analysis.md#an-organization)), and press *Scan*.
+  Written as the [CLI](cli.md#command-line) takes it: a query or a fragment (`?tab=readme-ov-file`,
+  `#readme`) is ignored.
   A local directory is not accepted here: the page is for links.
 - The repository's skills fill the **catalog**: a card per skill with its name, its description's
   *first sentence*, its repository, its path and `Updated <YYYY-MM-DD>`: the day it
