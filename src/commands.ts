@@ -55,7 +55,8 @@ export async function run(args: string[], context: Context): Promise<number> {
     return 0;
   } catch (error) {
     if (!(error instanceof AtlasError)) throw error;
-    context.error(error.message);
+    // A message can quote a repository's text (a path, GitHub's answer); its own lines are kept.
+    context.error(error.message.split('\n').map(visible).join('\n'));
     return 1;
   }
 }
@@ -87,9 +88,9 @@ async function scanCommand(args: string[], context: Context) {
   // Grouped before anything is printed: a clustering that fails prints nothing but its error.
   const topics = ask && (await topicsOf(skills.map((skill) => ({ repository: result.repository, skill })), ask));
   printRepository(result.repository, skills, text ? result.skills.length : undefined, context, topics);
-  for (const warning of result.warnings) context.error(`warning: ${warning}`);
+  for (const warning of result.warnings) context.error(`warning: ${visible(warning)}`);
   // What was read before the scan stopped is printed above; the error still makes it a failure.
-  if (result.error !== undefined) throw new AtlasError(`scan incomplete: ${result.error}`);
+  if (result.error !== undefined) throw new AtlasError(`scan incomplete: ${visible(result.error)}`);
 }
 
 async function rulesCommand(args: string[], context: Context) {
@@ -125,7 +126,7 @@ function printRepository(repository: Repository, skills: Skill[], total: number 
   const { print, terminal } = context;
   const count = total === undefined ? `${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}` : `${skills.length} of ${total} skills`;
   const style = styles(terminal);
-  print(`${style.bold(repository.id)} ${style.dim(`· ${count}`)}`);
+  print(`${style.bold(visible(repository.id))} ${style.dim(`· ${count}`)}`);
   if (topics) printTopics(topics, context);
   else for (const skill of skills) printSkill(repository, skill, context);
 }
@@ -136,8 +137,8 @@ function printSkill(repository: Repository, skill: Skill, { print, terminal }: C
   if (terminal) print('');
   print(nameLine(skill, terminal, style));
   const day = updatedDay(skill);
-  print(`  ${style.dim(`${day ? `updated ${day} · ` : ''}${skillLink(repository, skill)}`)}`);
-  if (skill.copies.length > 0) print(`  ${style.dim(`also in ${skill.copies.join(', ')}`)}`);
+  print(`  ${style.dim(`${day ? `updated ${day} · ` : ''}${visible(skillLink(repository, skill))}`)}`);
+  if (skill.copies.length > 0) print(`  ${style.dim(`also in ${visible(skill.copies.join(', '))}`)}`);
 }
 
 /** A skill and the repository it is in: an organization's topics mix repositories. */
@@ -161,7 +162,7 @@ async function topicsOf(listed: Listed[], ask: Ask): Promise<Topic[]> {
 function printTopics(topics: Topic[], context: Context) {
   for (const { topic, skills } of topics) {
     context.print('');
-    context.print(`## ${topic} · ${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}`);
+    context.print(`## ${visible(topic)} · ${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}`);
     for (const { repository, skill } of skills) printSkill(repository, skill, context);
   }
 }
@@ -176,15 +177,24 @@ function styles(terminal: Terminal | undefined) {
 }
 
 /**
+ * The text with each control character (C0, DEL, C1: ESC, CR, LF…) shown as `�`. What a repository
+ * wrote is printed this way, so it can neither change the terminal nor start a line of its own.
+ */
+export function visible(text: string): string {
+  return text.replace(/[\x00-\x1f\x7f-\x9f]/g, '\uFFFD');
+}
+
+/**
  * `<name> — <first sentence>`, or the name alone without a description. In a terminal, cut to its
  * width: the sentence first; a name with no room left for any of it, the name alone, cut too.
  */
 function nameLine(skill: Skill, terminal: Terminal | undefined, style: ReturnType<typeof styles>): string {
-  const summary = skill.description ? firstSentence(skill.description) : '';
-  if (!terminal) return summary ? `${skill.name} — ${summary}` : skill.name;
-  const room = terminal.columns - [...skill.name].length - 3;
-  if (!summary || room < 1) return style.name(fit(skill.name, terminal.columns));
-  return `${style.name(skill.name)} — ${fit(summary, room)}`;
+  const name = visible(skill.name);
+  const summary = skill.description ? visible(firstSentence(skill.description)) : '';
+  if (!terminal) return summary ? `${name} — ${summary}` : name;
+  const room = terminal.columns - [...name].length - 3;
+  if (!summary || room < 1) return style.name(fit(name, terminal.columns));
+  return `${style.name(name)} — ${fit(summary, room)}`;
 }
 
 /** The text, cut to `width` characters (at least 1) with `…` if longer. */
@@ -210,19 +220,19 @@ async function printOrganization(result: OrganizationResult, context: Context, f
   const topics = ask && (await topicsOf(repositories.flatMap(({ scanResult, skills }) =>
     skills.map((skill) => ({ repository: scanResult.repository, skill }))), ask));
   const style = styles(context.terminal);
-  context.print(`${style.bold(result.owner.id)} ${style.dim(`· ${organizationSummary(skills, repositories.length, result.listed)}`)}`);
+  context.print(`${style.bold(visible(result.owner.id))} ${style.dim(`· ${organizationSummary(skills, repositories.length, result.listed)}`)}`);
   if (topics) printTopics(topics, context);
   else for (const { scanResult, skills } of repositories) {
     context.print('');
     printRepository(scanResult.repository, skills, filter ? scanResult.skills.length : undefined, context);
   }
-  for (const { repository, warnings } of result.repositories) for (const warning of warnings) context.error(`warning: ${repository.id}: ${warning}`);
-  for (const warning of result.warnings) context.error(`warning: ${warning}`);
+  for (const { repository, warnings } of result.repositories) for (const warning of warnings) context.error(`warning: ${repository.id}: ${visible(warning)}`);
+  for (const warning of result.warnings) context.error(`warning: ${visible(warning)}`);
   // A repository that stopped partway is printed with what it read, filtered out or not; the
   // organization scan is still a failure, as for one repository.
   const incomplete = result.repositories.filter(({ error }) => error !== undefined);
   if (incomplete.length > 0) {
-    throw new AtlasError(incomplete.map(({ repository, error }) => `scan incomplete: ${repository.id}: ${error}`).join('\n'));
+    throw new AtlasError(incomplete.map(({ repository, error }) => `scan incomplete: ${repository.id}: ${visible(error!)}`).join('\n'));
   }
 }
 

@@ -25,6 +25,11 @@ build-tools-bump-gradle-api — Bumps the Gradle API…
   in UTC; left out when it is not known
 - With `--filter`: `JetBrains/kotlin · 2 of 6 skills`, then only those two
 - `also in <paths>` for identical copies and symbolic links, main path first; warnings go to *stderr*
+- What comes from the scanned repository (a name, a sentence, a path, a directory's name, a warning,
+  an error) or from the model (a topic) is someone else's text: each control character in it (C0,
+  DEL, C1: ESC, BEL, CR, LF…) is printed as `�`. So nothing in the output can change the terminal
+  (clear it, move the cursor, color, link), and one skill is always one name line. In a terminal and
+  in a pipe alike.
 - **In a terminal** (stdout is a TTY), the same lines, laid out for reading: an empty line before
   each skill; the line with the name cut to the terminal's width with `…` (the link line never is,
   so the link stays whole): the sentence first, and a name with no room left for it alone, cut too
