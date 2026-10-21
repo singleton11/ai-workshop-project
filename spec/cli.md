@@ -20,7 +20,9 @@ JetBrains/kotlin · 6 skills
 build-tools-bump-gradle-api — Bumps the Gradle API…
   updated 2026-03-14 · https://github.com/JetBrains/kotlin/blob/<commit>/…
 ```
-- Sorted by **name**; the description's *first sentence*
+- Sorted by **name**; the description's *first sentence*: up to the first `.`, `!` or `?` followed
+  by a space or the end, or the first `。`, `！` or `？`, which needs no space after it (`本当？！`
+  keeps both marks); no such mark, the whole description
 - `updated <YYYY-MM-DD> · ` before the link: the day the skill [last changed](analysis.md#details),
   in UTC; left out when it is not known
 - With `--filter`: `JetBrains/kotlin · 2 of 6 skills`, then only those two

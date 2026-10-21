@@ -3,7 +3,7 @@
 // where skills live are yours to add.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -80,6 +80,35 @@ test('./fixture: every skill, sorted by name, linked to its file, with a warning
     ].join('\n'),
   );
   assert.match(fixture.stderr, /^warning: \.agents\/skills\/release-checklist\/SKILL\.md: malformed front matter: /);
+});
+
+test('the first sentence ends at . ! ? before a space or the end, and at 。！？ with no space after them', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'skill-atlas-sentences-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const skills: [string, string][] = [
+    ['ascii', 'Need a PDF? Use this skill. Or not!'],
+    ['dotted', 'Reads v1.2 files, e.g. old ones. Then stops.'],
+    ['ja', '日本語の説明文です。これは二番目の文です。'],
+    ['marks', '本当？！次の文。'],
+    ['mixed', 'PDFを読みます！Then English.'],
+    ['none', 'Ends without a mark'],
+    ['zh', '处理中文文档？是的。'],
+  ];
+  for (const [name, description] of skills) {
+    mkdirSync(join(dir, 'skills', name), { recursive: true });
+    writeFileSync(join(dir, 'skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}\n---\n`);
+  }
+  const result = await atlas(['scan', dir]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(result.stdout.split('\n').filter((line) => !line.startsWith('  ')).slice(1), [
+    'ascii — Need a PDF?',
+    'dotted — Reads v1.2 files, e.g.', // as before: a dot before a space ends it
+    'ja — 日本語の説明文です。',
+    'marks — 本当？！',
+    'mixed — PDFを読みます！',
+    'none — Ends without a mark',
+    'zh — 处理中文文档？',
+  ]);
 });
 
 test('the CLI prints the result at once and stores nothing but the rules file', (t) => {

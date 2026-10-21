@@ -11,7 +11,7 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
   (`https://github.com/<owner>`, [what is scanned](analysis.md#an-organization)), and press *Scan*.
   A local directory is not accepted here: the page is for links.
 - The repository's skills fill the **catalog**: a card per skill with its name, its description's
-  *first sentence*, its repository, its path and `Updated <YYYY-MM-DD>`: the day it
+  [*first sentence*](cli.md#output), its repository, its path and `Updated <YYYY-MM-DD>`: the day it
   [last changed](analysis.md#details), in UTC, the whole time on hover; no date, no such line.
   Sorted by name, then path, as in the CLI.
 - A card: the name, with `Updated <YYYY-MM-DD>` on the same line; the first sentence, cut to three

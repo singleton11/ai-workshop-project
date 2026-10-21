@@ -20,6 +20,7 @@ const COMMIT = '1111111111111111111111111111111111111111';
 const TAGGED = '2222222222222222222222222222222222222222';
 const OTHER = '3333333333333333333333333333333333333333';
 const FLAKY = '4444444444444444444444444444444444444444';
+const CJK = '5555555555555555555555555555555555555555';
 
 /** GitHub for the CLI's own process: answers from NET, a file's history held back (tests/held-history.mjs). */
 const HELD_HISTORY = fileURLToPath(new URL('./held-history.mjs', import.meta.url));
@@ -76,6 +77,12 @@ const RECORDING: Recording = {
   'https://api.github.com/repos/acme/other/commits/trunk': { status: 200, body: { sha: OTHER } },
   [`https://api.github.com/repos/acme/other/git/trees/${OTHER}?recursive=1`]: tree(['.claude/skills/triage/SKILL.md']),
   ...raw('acme/other', OTHER, '.claude/skills/triage/SKILL.md', '---\nname: triage\ndescription: Sort new issues.\n---\nSteps.\n'),
+  // acme/cjk: descriptions whose sentences end with 。 or ？, with no space after them.
+  'https://api.github.com/repos/acme/cjk': { status: 200, body: { full_name: 'acme/cjk', default_branch: 'main' } },
+  'https://api.github.com/repos/acme/cjk/commits/main': { status: 200, body: { sha: CJK } },
+  [`https://api.github.com/repos/acme/cjk/git/trees/${CJK}?recursive=1`]: tree(['skills/ja/SKILL.md', 'skills/zh/SKILL.md']),
+  ...raw('acme/cjk', CJK, 'skills/ja/SKILL.md', '---\nname: ja\ndescription: 日本語の説明文です。これは二番目の文です。\n---\n'),
+  ...raw('acme/cjk', CJK, 'skills/zh/SKILL.md', '---\nname: zh\ndescription: 处理中文文档？是的。\n---\n'),
   'https://api.github.com/repos/acme/missing': { status: 404, body: { message: 'Not Found' } },
   // acme/flaky: GitHub fails on one of its two skills; at tag v2, on its only one.
   'https://api.github.com/repos/acme/flaky': { status: 200, body: { full_name: 'acme/flaky', default_branch: 'main' } },
@@ -158,6 +165,15 @@ test('GET /api/scan: the skills, sorted, each with its link, summary, copies, pr
   assert.deepEqual(review.properties, { 'allowed-tools': 'Read, Grep', metadata: { owner: 'platform' } });
   assert.match(review.html, /<h1>Review<\/h1>/);
   assert.deepEqual(body.warnings, ['.claude/skills/broken/SKILL.md: malformed front matter: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 14; using the directory name']);
+});
+
+test('GET /api/scan: a summary ends at 。！？ too, with no space after them', async () => {
+  const { status, body } = await api('https://github.com/acme/cjk');
+  assert.equal(status, 200);
+  assert.deepEqual(body.skills.map(({ summary, description }: { summary: string; description: string }) => [summary, description]), [
+    ['日本語の説明文です。', '日本語の説明文です。これは二番目の文です。'],
+    ['处理中文文档？', '处理中文文档？是的。'],
+  ]);
 });
 
 test('GET /api/scan: each skill with when its SKILL.md last changed, up to the scanned commit; empty if not known', async (t) => {
@@ -678,6 +694,13 @@ test('the page: a pasted URL fills the catalog with a card per skill, sorted, an
   assert.equal(p.text('#count'), '3 skills');
   assert.deepEqual(p.params(), ['https://github.com/acme/tools']);
   assert.equal((p.$('#scan-url') as HTMLInputElement).value, '');
+});
+
+test('the page: a card shows the first sentence of a Japanese or Chinese description, and only it on hover', async () => {
+  const p = await page();
+  await p.scan('https://github.com/acme/cjk');
+  assert.deepEqual(p.texts('.card-text'), ['日本語の説明文です。', '处理中文文档？']);
+  assert.deepEqual(p.all('.card-text').map((text) => text.getAttribute('title')), ['日本語の説明文です。', '处理中文文档？']);
 });
 
 test('the page: warnings with their repository', async () => {

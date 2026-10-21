@@ -231,7 +231,11 @@ export function organizationSummary(skills: number, withSkills: number, listed: 
   return `${skills} ${skills === 1 ? 'skill' : 'skills'} in ${withSkills} of ${listed} ${listed === 1 ? 'repository' : 'repositories'}`;
 }
 
+/**
+ * Up to the first `.`, `!` or `?` followed by a space or the end, or the first `。`, `！` or `？`
+ * (with those right after it), which need no space: Japanese and Chinese put none.
+ */
 export function firstSentence(text: string): string {
   const line = text.replace(/\s+/g, ' ').trim();
-  return /^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line;
+  return /^.*?(?:[.!?](?=\s|$)|[。！？]+)/.exec(line)?.[0] ?? line;
 }
