@@ -123,12 +123,20 @@ test('an organization in a terminal: its totals line in bold and dimmed, each re
 });
 
 test('https://github.com/<owner> is an organization; …/<owner>/<repo> is still a repository', () => {
-  for (const url of ['https://github.com/acme', 'github.com/acme/', 'http://www.github.com/acme', ' github.com/acme ']) {
+  for (const url of ['https://github.com/acme', 'github.com/acme/', 'http://www.github.com/acme', ' github.com/acme ', 'https://github.com/acme?tab=repositories', 'github.com/acme/#top']) {
     assert.deepEqual(parseGitHubOwnerUrl(url), { owner: 'acme' }, url);
     assert.equal(parseGitHubUrl(url), undefined, url);
   }
   for (const url of ['github.com/acme/tools', 'github.com/acme/tools/tree/v1', 'gitlab.com/acme', 'github.com/']) {
     assert.equal(parseGitHubOwnerUrl(url), undefined, url);
+  }
+});
+
+test('an organization URL copied from GitHub, with a query or a fragment, scans that organization', async () => {
+  for (const url of ['https://github.com/acme?tab=repositories', 'https://github.com/acme#readme']) {
+    const result = await atlas(['scan', url], { recording: ACME, token: undefined });
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, ACME_OUTPUT, url);
   }
 });
 

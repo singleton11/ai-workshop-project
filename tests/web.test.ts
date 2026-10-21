@@ -238,6 +238,27 @@ test('…/tree/<ref>: that ref, and a source of its own', async () => {
   assert.deepEqual(body.skills.map((skill: { description: string }) => skill.description), ['The old deploy.']);
 });
 
+test('a URL copied from GitHub, with a query or a fragment: the same repository or organization, the same answer', async () => {
+  const plain = await api('https://github.com/acme/tools');
+  for (const url of ['https://github.com/acme/tools?tab=readme-ov-file', 'https://github.com/acme/tools#readme', 'github.com/acme/tools/?tab=readme-ov-file#readme']) {
+    assert.deepEqual(await api(url), plain, url);
+  }
+  const tagged = await api('https://github.com/acme/tools/tree/v1');
+  assert.deepEqual(await api('https://github.com/acme/tools/tree/v1?tab=readme-ov-file'), tagged);
+  assert.equal(tagged.body.source, 'https://github.com/acme/tools/tree/v1');
+  const organization = await api('https://github.com/acme');
+  assert.equal(organization.status, 200);
+  assert.deepEqual(await api('https://github.com/acme?tab=repositories'), organization);
+});
+
+test('the CLI: a repository URL with a query or a fragment prints what the plain URL prints', async () => {
+  const plain = await atlas(['scan', 'https://github.com/acme/tools'], { recording: RECORDING, token: undefined });
+  assert.equal(plain.code, 0, plain.stderr);
+  for (const url of ['https://github.com/acme/tools?tab=readme-ov-file', 'https://github.com/acme/tools#readme']) {
+    assert.deepEqual(await atlas(['scan', url], { recording: RECORDING, token: undefined }), plain, url);
+  }
+});
+
 test('a missing or bad URL, or a local directory → 400; what the CLI explains → 422, with its message', async () => {
   assert.deepEqual(await api(''), { status: 400, body: { error: 'Paste a GitHub repository or organization URL' } });
   assert.deepEqual(await api(FIXTURE), { status: 400, body: { error: `Not a GitHub repository or organization URL: ${FIXTURE}` } });
@@ -706,6 +727,18 @@ test('the page: more repositories, grouped; the same one again replaces it; each
   (p.$('[data-repository="acme/other"] .button-ghost') as HTMLButtonElement).click();
   assert.deepEqual(p.texts('.repository-name'), ['acme/tools', 'acme/tools']);
   assert.deepEqual(p.params(), ['https://github.com/acme/tools', 'https://github.com/acme/tools/tree/v1']);
+});
+
+test('the page: a URL copied from GitHub\'s address bar, with ?tab=… or #…, fills the catalog as the plain URL does', async () => {
+  const p = await page();
+  await p.scan('https://github.com/acme/tools?tab=readme-ov-file');
+  assert.equal(p.text('#scan-error'), '');
+  assert.deepEqual(p.texts('.repository-name'), ['acme/tools']);
+  assert.equal(p.text('#count'), '3 skills');
+  assert.deepEqual(p.params(), ['https://github.com/acme/tools']);
+  await p.scan('https://github.com/acme/tools#readme'); // the same repository: it replaces it
+  assert.deepEqual(p.texts('.repository-name'), ['acme/tools']);
+  assert.deepEqual(p.params(), ['https://github.com/acme/tools']);
 });
 
 test('the page: the filter narrows by name, description or path, in any letter case', async () => {
