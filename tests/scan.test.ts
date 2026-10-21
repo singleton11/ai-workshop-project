@@ -3,7 +3,7 @@
 // where skills live are yours to add.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -173,6 +173,28 @@ test('--filter keeps the skills whose name, description or path contains the tex
   // The whole description counts, not only the first sentence that is printed.
   const github = await atlas(['scan', '--filter', 'every commit', 'github.com/JetBrains/example']);
   assert.equal(github.stdout.split('\n')[0], 'JetBrains/example · 1 of 1 skills');
+});
+
+test('an empty input → the usage, exit code 1, not a scan of the current directory', (t) => {
+  // In a directory with a skill of its own, as from `scan "$URL"` with no URL.
+  const cwd = mkdtempSync(join(tmpdir(), 'skill-atlas-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(join(cwd, '.claude/skills/x'), { recursive: true });
+  writeFileSync(join(cwd, '.claude/skills/x/SKILL.md'), '---\nname: x\ndescription: X.\n---\n');
+  const usage = 'Usage: skill-atlas scan [--rules <file>] [--filter <text>] [--cluster] <GitHub URL | directory>';
+  const env = { ...process.env, SKILL_ATLAS_RULES: join(cwd, 'rules.yaml') };
+  for (const args of [[''], ['--filter', 'x', ''], ['', '--cluster'], ['--rules', join(cwd, 'rules.yaml'), '']]) {
+    const scanned = spawnSync(process.execPath, [CLI, 'scan', ...args], { cwd, env, encoding: 'utf8' });
+    assert.equal(scanned.status, 1, scanned.stdout);
+    assert.equal(scanned.stdout, '');
+    assert.equal(scanned.stderr, `${usage}\n`);
+  }
+  // The usage comes before the rules: no rules file is created for it.
+  assert.deepEqual(readdirSync(cwd), ['.claude']);
+  // A directory named " " is a directory: only the empty input is no input.
+  const blank = spawnSync(process.execPath, [CLI, 'scan', ' '], { cwd, env, encoding: 'utf8' });
+  assert.equal(blank.status, 1);
+  assert.match(blank.stderr, /\nNot a GitHub URL or a readable directory:  \n$/);
 });
 
 test('--filter: no match is not an error; an empty text keeps every skill; given twice → usage', async () => {
