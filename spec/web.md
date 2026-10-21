@@ -14,6 +14,9 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
   *first sentence*, its repository, its path and `Updated <YYYY-MM-DD>`: the day it
   [last changed](analysis.md#details), in UTC, the whole time on hover; no date, no such line.
   Sorted by name, then path, as in the CLI.
+- A card: the name, with `Updated <YYYY-MM-DD>` on the same line; the first sentence, cut to three
+  lines, all of it on hover; the path in a chip, cut with `…` if it does not fit, all of it on hover.
+  The repository's heading, its number of skills and its commit sit above a line over its cards.
 - More URLs add more repositories; the catalog holds them all, grouped by repository, with the
   number of skills and the scanned commit. Scanning a repository again replaces its skills.
   Each repository can be removed.

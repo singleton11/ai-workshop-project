@@ -6,8 +6,8 @@ rm -rf tests/visual/screenshots tests/visual/results
 mkdir -p tests/visual/screenshots tests/visual/results
 status=0
 npx playwright test -c tests/visual/playwright.config.ts || status=1
-for tape in cli last-updated; do vhs tests/visual/$tape.tape || status=1; done
-for screenshot in cli-partial-scan cli-last-updated; do
+for tape in cli last-updated nicer-list; do vhs tests/visual/$tape.tape || status=1; done
+for screenshot in cli-partial-scan cli-last-updated cli-nicer-list cli-nicer-list-piped; do
   [ -f tests/visual/screenshots/$screenshot.png ] || { echo "no $screenshot.png: a tape took no screenshot" >&2; status=1; }
 done
 exit $status
