@@ -185,7 +185,6 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .card-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); }
 .card-title { flex: 1 1 auto; min-width: 0; font-weight: 650; font-size: 15px; overflow-wrap: anywhere; }
 .card-text {
-  flex: 1;
   color: var(--muted);
   font-size: 14px;
   display: -webkit-box;
@@ -193,8 +192,11 @@ code { font-family: var(--mono); font-size: 0.9em; }
   -webkit-line-clamp: 3;
   line-clamp: 3;
   overflow: hidden;
+  overflow-wrap: anywhere;
 }
 .card-path {
+  /* At the card's foot; the text keeps its three lines, the rest hidden, beside a taller card. */
+  margin-top: auto;
   align-self: flex-start;
   max-width: 100%;
   padding: 2px 8px;
@@ -220,8 +222,9 @@ code { font-family: var(--mono); font-size: 0.9em; }
 
 /* A skill */
 .back { margin-bottom: var(--space-5); }
-.skill-head h1 { margin: 0 0 var(--space-2); font-size: 28px; line-height: 1.2; }
-.skill-head .lead { font-size: 16px; margin: 0 0 var(--space-5); color: var(--muted); }
+/* Someone else's text: a long word (a URL) wraps, as on the card and in .meta, not widening the page. */
+.skill-head h1 { margin: 0 0 var(--space-2); font-size: 28px; line-height: 1.2; overflow-wrap: anywhere; }
+.skill-head .lead { font-size: 16px; margin: 0 0 var(--space-5); color: var(--muted); overflow-wrap: anywhere; }
 .skill-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--space-5); align-items: start; }
 @media (max-width: 860px) { .skill-layout { grid-template-columns: 1fr; } }
 

@@ -811,6 +811,17 @@ test('the page: a card opens its skill, with everything the SKILL.md says; Back 
   assert.equal(p.all('.card').length, 3);
 });
 
+// jsdom lays nothing out: the page in a browser, at 1280 and 375 px, is tests/visual/long-words*.spec.ts.
+test('the page: a long word of the repository\'s (a URL) wraps in the skill\'s header and on its card; no element of it widens the page', async () => {
+  const css = await (await fetch(`${base}style.css`)).text();
+  const rule = (selector: string) => css.match(new RegExp(`^${selector.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`, 'm'))?.[1] ?? '';
+  for (const selector of ['.card-title', '.card-text', '.skill-head h1', '.skill-head .lead', '.meta dd']) {
+    assert.match(rule(selector), /overflow-wrap: anywhere;/, selector);
+  }
+  // Cut to three lines: the text is not stretched to a taller card's height, which would show the lines after the cut.
+  assert.doesNotMatch(rule('.card-text'), /flex: 1/);
+});
+
 test('the page: nothing is stored; a reload of the address scans again and opens the skill', async () => {
   const id = encodeURIComponent('acme/other:.claude/skills/triage/SKILL.md');
   const p = await page(`?repo=${encodeURIComponent('https://github.com/acme/tools')}&repo=github.com/acme/other#${id}`);

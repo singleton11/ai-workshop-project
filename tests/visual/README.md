@@ -3,11 +3,12 @@
 Each demo's key moments are screenshots. Argos compares them with the approved baseline and a
 human approves any difference side by side.
 
-- `partial-scan.spec.ts`, `last-updated.spec.ts`, `nicer-list.spec.ts`, `clustering.spec.ts`, `unknown-ref.spec.ts`: the web demos (Playwright). `shot()` is a key moment.
+- `partial-scan.spec.ts`, `last-updated.spec.ts`, `nicer-list.spec.ts`, `clustering.spec.ts`, `unknown-ref.spec.ts`, `long-words.spec.ts`, `long-words-phone.spec.ts` (375×667; steps shared in `long-words.ts`): the web demos (Playwright). `shot()` is a key moment.
 - `cli.tape`, `last-updated.tape`, `nicer-list.tape`, `clustering.tape`, `empty-input.tape`, `unknown-ref.tape`, `wide-characters.tape`: the CLI demos (VHS). `Screenshot` is a key moment.
 - `net.json`: GitHub's answers, replayed by `flaky.mjs`; no network. Recorded without a token.
   Each skill's date is one more answer: `…/commits?sha=<commit>&path=<file>&per_page=1`.
   An unknown ref is GitHub's `422` for `…/commits/no-such-ref`.
+  `example/long-words` is made up, not recorded: `node tests/visual/long-words.mjs` writes it in.
   Record again: `env -u GITHUB_TOKEN RECORD=$PWD/tests/visual/net.json node --import ./.agents/skills/record-feature-video/scripts/flaky.mjs src/cli.ts scan <url>`.
 - `claude.json`: the model's answer for clustering anthropics/skills (`claude -p --model haiku`),
   replayed by `.agents/skills/record-feature-video/scripts/claude.mjs` whatever the question: no model.

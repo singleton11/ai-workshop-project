@@ -166,5 +166,41 @@
  "https://api.github.com/repos/anthropics/skills/commits/no-such-ref": {
   "status": 422,
   "body": "{\"message\":\"No commit found for SHA: no-such-ref\",\"documentation_url\":\"https://docs.github.com/rest/commits/commits#get-a-commit\",\"status\":\"422\"}"
+ },
+ "https://api.github.com/repos/example/long-words": {
+  "status": 200,
+  "body": "{\"full_name\":\"example/long-words\",\"default_branch\":\"main\"}"
+ },
+ "https://api.github.com/repos/example/long-words/commits/main": {
+  "status": 200,
+  "body": "{\"sha\":\"c0ffee0000000000000000000000000000000037\"}"
+ },
+ "https://api.github.com/repos/example/long-words/git/trees/c0ffee0000000000000000000000000000000037?recursive=1": {
+  "status": 200,
+  "body": "{\"sha\":\"c0ffee0000000000000000000000000000000037\",\"truncated\":false,\"tree\":[{\"path\":\"skills/docs-fetch/SKILL.md\",\"mode\":\"100644\",\"type\":\"blob\",\"sha\":\"skills/docs-fetch/SKILL.md\"},{\"path\":\"skills/long-name/SKILL.md\",\"mode\":\"100644\",\"type\":\"blob\",\"sha\":\"skills/long-name/SKILL.md\"},{\"path\":\"skills/release-notes/SKILL.md\",\"mode\":\"100644\",\"type\":\"blob\",\"sha\":\"skills/release-notes/SKILL.md\"}]}"
+ },
+ "https://raw.githubusercontent.com/example/long-words/c0ffee0000000000000000000000000000000037/skills/docs-fetch/SKILL.md": {
+  "status": 200,
+  "body": "---\nname: docs-fetch\ndescription: Fetches the API reference from https://docs.example.com/reference/v2/organizations/projects/environments/deployments/rollouts/canary-analysis/metrics-and-thresholds.html before answering.\n---\n# Steps\n\nThe steps, in order.\n"
+ },
+ "https://api.github.com/repos/example/long-words/commits?sha=c0ffee0000000000000000000000000000000037&path=skills/docs-fetch/SKILL.md&per_page=1": {
+  "status": 200,
+  "body": "[{\"commit\":{\"committer\":{\"date\":\"2026-03-14T12:00:00Z\"}}}]"
+ },
+ "https://raw.githubusercontent.com/example/long-words/c0ffee0000000000000000000000000000000037/skills/long-name/SKILL.md": {
+  "status": 200,
+  "body": "---\nname: LongNameLongNameLongNameLongNameLongNameLongNameLongNameLongNameLongNameLongNameLongNameLongNameLongNameLongNameLongNameLongNameLongNameLongNameLongNameLongName\ndescription: WordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWordWord. Then the rest.\n---\n# Steps\n\nThe steps, in order.\n"
+ },
+ "https://api.github.com/repos/example/long-words/commits?sha=c0ffee0000000000000000000000000000000037&path=skills/long-name/SKILL.md&per_page=1": {
+  "status": 200,
+  "body": "[{\"commit\":{\"committer\":{\"date\":\"2026-03-14T12:00:00Z\"}}}]"
+ },
+ "https://raw.githubusercontent.com/example/long-words/c0ffee0000000000000000000000000000000037/skills/release-notes/SKILL.md": {
+  "status": 200,
+  "body": "---\nname: release-notes\ndescription: Write the release notes from the pull requests merged since the last tag. Use before a release.\n---\n# Steps\n\nThe steps, in order.\n"
+ },
+ "https://api.github.com/repos/example/long-words/commits?sha=c0ffee0000000000000000000000000000000037&path=skills/release-notes/SKILL.md&per_page=1": {
+  "status": 200,
+  "body": "[{\"commit\":{\"committer\":{\"date\":\"2026-03-14T12:00:00Z\"}}}]"
  }
 }
