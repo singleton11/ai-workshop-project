@@ -186,6 +186,18 @@ test('in a terminal: an emoji takes two columns, a combining mark none, an emoji
   assert.equal(await line(35), '🚀 rocket — Launch café builds 👩‍💻…');
 });
 
+test('in a terminal: a halfwidth voiced kana, "ｶﾞ", is one grapheme but two columns', async () => {
+  const line = async (text: string, columns: number) =>
+    (await atlas(['scan', 'github.com/JetBrains/example'], { recording: withSkillFile(text), terminal: { columns, color: false } })).stdout.split('\n')[5];
+  // "ｶﾞ" is "ｶ" and "ﾞ": a column each. 20 columns: "kana — " 7, six of them (12) and "…".
+  const sentence = `---\nname: kana\ndescription: ${'ｶﾞ'.repeat(20)}. Next.\n---\n`;
+  assert.equal(await line(sentence, 20), `kana — ${'ｶﾞ'.repeat(6)}…`);
+  // 21: the seventh would cross the edge, so it is left out; the line is 20 columns.
+  assert.equal(await line(sentence, 21), `kana — ${'ｶﾞ'.repeat(6)}…`);
+  // A name 60 columns wide, at 40: nineteen of them (38) and "…".
+  assert.equal(await line(`---\nname: ${'ｶﾞ'.repeat(30)}\ndescription: Kana.\n---\n`, 40), `${'ｶﾞ'.repeat(19)}…`);
+});
+
 test('the CLI in a terminal 40 columns wide: a CJK line fits it, as an ASCII one does', { skip: !hasScript() && 'needs util-linux `script` for a terminal' }, (t) => {
   const root = mkdtempSync(join(tmpdir(), 'skill-atlas-wide-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

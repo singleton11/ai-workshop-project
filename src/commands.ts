@@ -214,7 +214,9 @@ function graphemeColumns(grapheme: string): number {
   if (/\p{Emoji_Presentation}|\p{Extended_Pictographic}\uFE0F|\p{Regional_Indicator}{2}/u.test(grapheme)) return 2;
   const code = grapheme.codePointAt(0)!;
   if (/^[\p{Cc}\p{Cf}\p{Mn}\p{Me}]/u.test(grapheme)) return 0;
-  return isWide(code) ? 2 : 1;
+  // A halfwidth (semi-)voiced mark, "ﾞ" or "ﾟ", joins the grapheme before it but takes a column of its own.
+  const marks = grapheme.slice(1).match(/[ﾞﾟ]/g)?.length ?? 0;
+  return (isWide(code) ? 2 : 1) + marks;
 }
 
 /** East Asian Wide and Fullwidth (Unicode's EastAsianWidth.txt, W and F), emoji aside. */
