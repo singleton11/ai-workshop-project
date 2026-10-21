@@ -4,7 +4,7 @@ Each demo's key moments are screenshots. Argos compares them with the approved b
 human approves any difference side by side.
 
 - `partial-scan.spec.ts`, `last-updated.spec.ts`, `nicer-list.spec.ts`, `clustering.spec.ts`, `unknown-ref.spec.ts`: the web demos (Playwright). `shot()` is a key moment.
-- `cli.tape`, `last-updated.tape`, `nicer-list.tape`, `clustering.tape`, `empty-input.tape`, `unknown-ref.tape`, `wide-characters.tape`: the CLI demos (VHS). `Screenshot` is a key moment.
+- `cli.tape`, `last-updated.tape`, `nicer-list.tape`, `clustering.tape`, `empty-input.tape`, `unknown-ref.tape`, `wide-characters.tape`, `empty-home.tape`: the CLI demos (VHS). `Screenshot` is a key moment.
 - `net.json`: GitHub's answers, replayed by `flaky.mjs`; no network. Recorded without a token.
   Each skill's date is one more answer: `…/commits?sha=<commit>&path=<file>&per_page=1`.
   An unknown ref is GitHub's `422` for `…/commits/no-such-ref`.
@@ -13,6 +13,7 @@ human approves any difference side by side.
   replayed by `.agents/skills/record-feature-video/scripts/claude.mjs` whatever the question: no model.
   Record again: `SKILL_ATLAS_CLAUDE=$PWD/.agents/skills/record-feature-video/scripts/claude.mjs CLAUDE_RECORD=/tmp/claude.json`
   with the `scan --cluster` above, then keep `type`, `subtype`, `is_error` and `result`.
+- `empty-home.sh`, `wide-characters.sh`: the local folders their tapes scan, with fixed dates.
 - `rules.yaml`: the rules, fixed. `Dockerfile`: the one machine (OS, Chromium, fonts, VHS).
 
 ## Run

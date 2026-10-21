@@ -9,6 +9,8 @@ The rules are written once, on the first scan, and are never rewritten after tha
 2. Else `$SKILL_ATLAS_RULES`.
 3. Else `$XDG_CONFIG_HOME/skill-atlas/rules.yaml`, by default `~/.config/skill-atlas/rules.yaml`
    (`%APPDATA%\skill-atlas\rules.yaml` on Windows).
+   A relative `$XDG_CONFIG_HOME` or `%APPDATA%` is ignored, as the XDG Base Directory spec says.
+   An empty `HOME` (`HOME=`) is no home: there is no path, never one in the current directory.
 
 ## The first scan
 
@@ -18,6 +20,8 @@ The rules are written once, on the first scan, and are never rewritten after tha
 - The file is written all at once (temporary file → hard link), and an existing file is never
   overwritten, even by two first scans at the same moment.
 - If the file cannot be written (read-only home, no home): a *warning*, and the scan uses the defaults.
+  With no home: `warning: cannot write the rules: no home folder (set HOME or SKILL_ATLAS_RULES); using the defaults`,
+  nothing is written, and `rules` shows the defaults.
 - `rules` never creates it: it shows the file, or says it does not exist yet and shows the defaults.
 - `help` and an unknown command write nothing.
 
