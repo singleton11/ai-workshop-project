@@ -117,8 +117,7 @@ function printRepository(repository: Repository, skills: Skill[], total: number 
   print(`${style.bold(repository.id)} ${style.dim(`· ${count}`)}`);
   for (const skill of skills) {
     if (terminal) print('');
-    const summary = skill.description ? firstSentence(skill.description) : '';
-    print(summary ? `${style.name(skill.name)} — ${fit(summary, terminal && terminal.columns - skill.name.length - 3)}` : style.name(skill.name));
+    print(nameLine(skill, terminal, style));
     const day = updatedDay(skill);
     print(`  ${style.dim(`${day ? `updated ${day} · ` : ''}${skillLink(repository, skill)}`)}`);
     if (skill.copies.length > 0) print(`  ${style.dim(`also in ${skill.copies.join(', ')}`)}`);
@@ -134,11 +133,23 @@ function styles(terminal: Terminal | undefined) {
   return { bold: sgr('1'), dim: sgr('2'), name: sgr('1;36') };
 }
 
-/** The text, cut to `width` characters with `…` if longer; `undefined` or no room left: as it is. */
-function fit(text: string, width: number | undefined): string {
+/**
+ * `<name> — <first sentence>`, or the name alone without a description. In a terminal, cut to its
+ * width: the sentence first; a name with no room left for any of it, the name alone, cut too.
+ */
+function nameLine(skill: Skill, terminal: Terminal | undefined, style: ReturnType<typeof styles>): string {
+  const summary = skill.description ? firstSentence(skill.description) : '';
+  if (!terminal) return summary ? `${skill.name} — ${summary}` : skill.name;
+  const room = terminal.columns - [...skill.name].length - 3;
+  if (!summary || room < 1) return style.name(fit(skill.name, terminal.columns));
+  return `${style.name(skill.name)} — ${fit(summary, room)}`;
+}
+
+/** The text, cut to `width` characters (at least 1) with `…` if longer. */
+function fit(text: string, width: number): string {
   const characters = [...text];
-  if (width === undefined || width < 2 || characters.length <= width) return text;
-  return `${characters.slice(0, width - 1).join('').trimEnd()}…`;
+  if (characters.length <= width) return text;
+  return `${characters.slice(0, Math.max(width, 1) - 1).join('').trimEnd()}…`;
 }
 
 /**
