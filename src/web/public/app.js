@@ -32,6 +32,8 @@ let openedFromCatalog = false;
 let shownSkill;
 /** Where the skill view shows it, so showing it again leaves it scrolled where it was. */
 let shownAt;
+/** The card of the skill last shown, which has the focus again when the catalog is back. */
+let shownCard;
 /** The warnings the user opened, which stay open as scans redraw the catalog. */
 const openWarnings = new Set();
 /** The catalog by topic, if the user asked for it; by repository otherwise. @type {Grouping | undefined} */
@@ -312,12 +314,14 @@ function repositoriesOf(scan) {
   return 'repositories' in scan ? scan.repositories : [scan];
 }
 
+/** The skill, its repository's scan, and the source of the entry it is in, as its card has it. */
 function findSkill({ id, source }) {
   for (const entry of entries) {
-    if (source !== undefined && (entry.scan?.source ?? entry.key) !== source) continue;
+    const origin = entry.scan?.source ?? entry.key;
+    if (source !== undefined && origin !== source) continue;
     for (const scan of repositoriesOf(entry.scan)) {
       const skill = scan.skills.find((skill) => skill.id === id);
-      if (skill) return { skill, scan };
+      if (skill) return { skill, scan, origin };
     }
   }
   return undefined;
@@ -494,12 +498,15 @@ function updated(skill) {
 }
 
 function renderSkill(open) {
+  // Drawn again as its scan goes on: its name or Back, if it had the keyboard's focus, keeps it.
+  const focused = ['.skill-head h1', '.back'].find((selector) => document.activeElement === $('skill-view').querySelector(selector));
   const found = findSkill(open);
   shownSkill = found?.skill;
   // The same skill again, now that its scan is done: where it was scrolled to.
   const at = found && `${found.scan.source} ${found.skill.id}`;
   const again = at === shownAt;
   shownAt = at;
+  if (found) shownCard = skillHash(found.origin, found.skill.id);
   const back = h('button', { class: 'button back', type: 'button', onclick: closeSkill }, '← Back to the catalog');
   if (!found) {
     const loading = entries.some((entry) => entry.loading);
@@ -507,6 +514,7 @@ function renderSkill(open) {
       h('div', { class: 'empty' }, loading
         ? h('p', {}, h('span', { class: 'spinner' }), ' Scanning…')
         : h('p', { class: 'empty-title' }, `${open.id} is not in the catalog`)));
+    if (focused) back.focus({ preventScroll: true });
     return;
   }
   const { skill, scan } = found;
@@ -518,7 +526,7 @@ function renderSkill(open) {
   $('skill-view').replaceChildren(
     back,
     h('header', { class: 'skill-head' },
-      h('h1', {}, skill.name),
+      h('h1', { tabindex: '-1' }, skill.name),
       h('p', { class: 'lead' }, skill.description || 'No description.')),
     h('div', { class: 'skill-layout' },
       body,
@@ -532,6 +540,8 @@ function renderSkill(open) {
           skill.copies.length > 0 && [h('dt', {}, 'Also in'), h('dd', {}, h('ul', {}, skill.copies.map((copy) => h('li', {}, h('code', {}, copy)))))],
           properties.map(([key, value]) => [h('dt', {}, key), h('dd', {}, formatValue(value))])))));
   if (!again) scrollTo(0, 0);
+  // Newly shown, the keyboard's focus goes to its name, so the next Tab is in the skill.
+  if (!again || focused) $('skill-view').querySelector(focused ?? '.skill-head h1').focus({ preventScroll: true });
 }
 
 function formatValue(value) {
@@ -543,6 +553,14 @@ function closeSkill() {
   if (openedFromCatalog) return history.back();
   history.pushState(null, '', `${location.pathname}${location.search}`);
   render();
+  focusShownCard({});
+}
+
+/** Back in the catalog: the card of the skill just shown has the keyboard's focus again. */
+function focusShownCard(options) {
+  const card = [...document.querySelectorAll('#repositories [data-focus]')].find((element) => element.getAttribute('data-focus') === shownCard);
+  shownCard = undefined;
+  card?.focus(options);
 }
 
 // Start
@@ -566,6 +584,7 @@ addEventListener('hashchange', () => {
   if (wasOpen && !openSkill()) {
     openedFromCatalog = false;
     scrollTo(0, catalogScroll);
+    focusShownCard({ preventScroll: true });
   }
 });
 
