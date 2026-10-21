@@ -16,6 +16,7 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
   Sorted by name, then path, as in the CLI.
 - A card: the name, with `Updated <YYYY-MM-DD>` on the same line; the first sentence, cut to three
   lines, all of it on hover; the path in a chip, cut with `…` if it does not fit, all of it on hover.
+  Beside a taller card, the text still shows three lines, and the path stays at the card's foot.
   The repository's heading, its number of skills and its commit sit above a line over its cards.
 - More URLs add more repositories; the catalog holds them all, grouped by repository, with the
   number of skills and the scanned commit. Scanning a repository again replaces its skills.
@@ -69,6 +70,10 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
 Clicking a card opens it: the name, the whole description, the link to the `SKILL.md`
 at the scanned commit, the path, *Updated* (the day it last changed, if known), `also in` its
 copies, the other front matter keys, and the body rendered as Markdown. *Back* returns to the catalog.
+
+The name and the description come from someone else's repository too: a word too long for its line,
+such as a URL, wraps there and on the card (the name, and the first sentence within its three lines),
+at any width. It never makes the page wider than the window.
 
 The body comes from someone else's repository: raw HTML in it is shown as text, links other than
 `http(s):`, `mailto:` and relative ones are dropped, and the page allows no inline script.
