@@ -3,7 +3,7 @@
 FROM mcr.microsoft.com/playwright:v1.64.1-noble
 ARG VHS_VERSION=0.12.1
 RUN apt-get update -qq \
- && apt-get install -y -qq --no-install-recommends ffmpeg ttyd fonts-dejavu-core \
+ && apt-get install -y -qq --no-install-recommends ffmpeg ttyd fonts-dejavu-core fonts-noto-cjk fonts-noto-color-emoji \
  && curl -fsSL -o /tmp/vhs.deb "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_$(dpkg --print-architecture).deb" \
  && dpkg -i /tmp/vhs.deb && rm /tmp/vhs.deb \
  && ln -s "$(ls -d /ms-playwright/chromium-*/chrome-linux*/chrome | head -1)" /usr/bin/chromium \
