@@ -806,6 +806,37 @@ test('the page: a card opens its skill, with everything the SKILL.md says; Back 
   assert.equal(p.all('.card').length, 3);
 });
 
+test('the page: opening a card puts the focus on the skill\'s name; Back, the browser\'s back or the logo puts it on that card again', async () => {
+  const p = await page();
+  await p.scan('github.com/acme/tools');
+  const card = '[data-skill="acme/tools:skills/deploy/SKILL.md"]';
+  const focused = () => p.window.document.activeElement;
+  for (const close of [
+    () => (p.$('#skill-view .back') as HTMLButtonElement).click(),
+    () => p.window.history.back(),
+    () => p.$('[data-home]')?.click(),
+  ]) {
+    p.$(card)?.focus();
+    p.$(card)?.click();
+    await until(() => p.$('#skill-view')?.hidden === false);
+    assert.equal(p.text('#skill-view h1'), 'deploy');
+    assert.equal(focused(), p.$('#skill-view h1'));
+    close();
+    await until(() => p.$('#catalog-view')?.hidden === false);
+    assert.equal(focused(), p.$(card));
+  }
+});
+
+test('the page: a skill opened from the address has the focus on its name; Back puts it on its card', async () => {
+  const id = encodeURIComponent('acme/other:.claude/skills/triage/SKILL.md');
+  const p = await page(`?repo=github.com/acme/tools&repo=github.com/acme/other#${id}`);
+  await until(() => p.text('#skill-view h1') === 'triage');
+  assert.equal(p.window.document.activeElement, p.$('#skill-view h1'));
+  (p.$('#skill-view .back') as HTMLButtonElement).click();
+  await until(() => p.$('#catalog-view')?.hidden === false);
+  assert.equal(p.window.document.activeElement, p.$('[data-skill="acme/other:.claude/skills/triage/SKILL.md"]'));
+});
+
 test('the page: nothing is stored; a reload of the address scans again and opens the skill', async () => {
   const id = encodeURIComponent('acme/other:.claude/skills/triage/SKILL.md');
   const p = await page(`?repo=${encodeURIComponent('https://github.com/acme/tools')}&repo=github.com/acme/other#${id}`);

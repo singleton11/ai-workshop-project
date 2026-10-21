@@ -69,6 +69,9 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
 Clicking a card opens it: the name, the whole description, the link to the `SKILL.md`
 at the scanned commit, the path, *Updated* (the day it last changed, if known), `also in` its
 copies, the other front matter keys, and the body rendered as Markdown. *Back* returns to the catalog.
+For the keyboard: opening a skill puts the focus on its name, so the next Tab is in the skill, and
+*Back* (or the browser's back, or the logo) puts it on the skill's card again, so the next Tab goes
+on from there.
 
 The body comes from someone else's repository: raw HTML in it is shown as text, links other than
 `http(s):`, `mailto:` and relative ones are dropped, and the page allows no inline script.
