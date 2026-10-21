@@ -136,3 +136,80 @@ test('in a terminal: "also in" is dimmed; warnings on stderr are as they are', a
   assert.match(result.stdout, /\n {2}\x1b\[2malso in \.agents\/skills\/commits\/SKILL\.md, \.claude\/skills\/commits\/SKILL\.md\x1b\[0m$/);
   assert.equal(result.stderr, 'warning: plugins/a/SKILL.md: not a skill (matches no skills pattern)');
 });
+
+/** JetBrains/example with a second skill, as its SKILL.md says. */
+function withSkillFile(text: string): Recording {
+  const recording = withNotes('Keep notes.');
+  recording[`https://raw.githubusercontent.com/JetBrains/example/${EXAMPLE_COMMIT}/.claude/skills/notes/SKILL.md`] = { status: 200, body: text };
+  return recording;
+}
+
+const NIHONGO = '---\nname: 日本語のスキル\ndescription: 日本語の説明文はとても長いのでターミナルの幅を超えてしまいます。次の文。\n---\n';
+
+test('in a terminal: the width is in columns: a CJK character takes two', async () => {
+  const lines = async (columns: number) =>
+    (await atlas(['scan', 'github.com/JetBrains/example'], { recording: withSkillFile(NIHONGO), terminal: { columns, color: false } })).stdout.split('\n');
+  // 40 columns: the name 14, " — " 3, then 11 characters of the sentence (22) and "…".
+  const at40 = await lines(40);
+  assert.equal(at40[2], 'commits — Write commit messages the way…');
+  assert.equal(at40[5], '日本語のスキル — 日本語の説明文はとても…');
+  // 41: the twelfth character would cross the edge, so it is left out; the line is 40 columns.
+  assert.equal((await lines(41))[5], '日本語のスキル — 日本語の説明文はとても…');
+  // A sentence that fits in columns is left as it is ("。" ends no sentence: the description is one).
+  const whole = '日本語のスキル — 日本語の説明文はとても長いのでターミナルの幅を超えてしまいます。次の文。';
+  assert.equal((await lines(89))[5], whole);
+  assert.equal((await lines(88))[5], '日本語のスキル — 日本語の説明文はとても長いのでターミナルの幅を超えてしまいます。次の文…');
+});
+
+test('in a terminal: a wide name with no room left for its sentence is cut in columns too', async () => {
+  const line = async (columns: number) =>
+    (await atlas(['scan', 'github.com/JetBrains/example'], { recording: withSkillFile(NIHONGO), terminal: { columns, color: true } })).stdout.split('\n')[5];
+  // "日本語のスキル" is 14 columns: with " — ", 17 leave no room, 18 room for "…" only.
+  assert.equal(await line(18), `${name('日本語のスキル')} — …`);
+  assert.equal(await line(17), name('日本語のスキル'));
+  assert.equal(await line(14), name('日本語のスキル'));
+  assert.equal(await line(13), name('日本語のスキ…'));
+  assert.equal(await line(12), name('日本語のス…'));
+  assert.equal(await line(2), name('…'));
+  assert.equal(await line(1), name('…'));
+});
+
+test('in a terminal: an emoji takes two columns, a combining mark none, an emoji sequence two', async () => {
+  // "🚀 rocket" is 9 columns; "café" with a combining accent 4; "👩‍💻" (a ZWJ sequence) 2, "🇯🇵" 2.
+  const text = '---\nname: 🚀 rocket\ndescription: Launch café builds 👩‍💻🇯🇵 every day from the main branch of this repository.\n---\n';
+  const line = async (columns: number) =>
+    (await atlas(['scan', 'github.com/JetBrains/example'], { recording: withSkillFile(text), terminal: { columns, color: false } })).stdout.split('\n')[5];
+  assert.equal(await line(31), '🚀 rocket — Launch café builds…');
+  assert.equal(await line(34), '🚀 rocket — Launch café builds 👩‍💻…');
+  assert.equal(await line(36), '🚀 rocket — Launch café builds 👩‍💻🇯🇵…');
+  // 35: the flag would cross the edge, so it is left out; the line is 34 columns.
+  assert.equal(await line(35), '🚀 rocket — Launch café builds 👩‍💻…');
+});
+
+test('in a terminal: a halfwidth voiced kana, "ｶﾞ", is one grapheme but two columns', async () => {
+  const line = async (text: string, columns: number) =>
+    (await atlas(['scan', 'github.com/JetBrains/example'], { recording: withSkillFile(text), terminal: { columns, color: false } })).stdout.split('\n')[5];
+  // "ｶﾞ" is "ｶ" and "ﾞ": a column each. 20 columns: "kana — " 7, six of them (12) and "…".
+  const sentence = `---\nname: kana\ndescription: ${'ｶﾞ'.repeat(20)}. Next.\n---\n`;
+  assert.equal(await line(sentence, 20), `kana — ${'ｶﾞ'.repeat(6)}…`);
+  // 21: the seventh would cross the edge, so it is left out; the line is 20 columns.
+  assert.equal(await line(sentence, 21), `kana — ${'ｶﾞ'.repeat(6)}…`);
+  // A name 60 columns wide, at 40: nineteen of them (38) and "…".
+  assert.equal(await line(`---\nname: ${'ｶﾞ'.repeat(30)}\ndescription: Kana.\n---\n`, 40), `${'ｶﾞ'.repeat(19)}…`);
+});
+
+test('the CLI in a terminal 40 columns wide: a CJK line fits it, as an ASCII one does', { skip: !hasScript() && 'needs util-linux `script` for a terminal' }, (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'skill-atlas-wide-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'skills/cjk'), { recursive: true });
+  mkdirSync(join(root, 'skills/ascii'), { recursive: true });
+  writeFileSync(join(root, 'skills/cjk/SKILL.md'), NIHONGO);
+  writeFileSync(join(root, 'skills/ascii/SKILL.md'), '---\nname: ascii\ndescription: An ascii description that is long enough to be cut at forty columns. Next.\n---\n');
+  const command = `stty cols 40; '${process.execPath}' '${CLI}' scan '${root}'`;
+  const env = { ...process.env, SKILL_ATLAS_RULES: '/dev/null', TERM: 'xterm', NO_COLOR: '1' };
+  const scanned = spawnSync('script', ['-qec', command, '/dev/null'], { env, encoding: 'utf8' });
+  assert.equal(scanned.status, 0, scanned.stderr);
+  const lines = scanned.stdout.split(/\r?\n/);
+  assert.ok(lines.includes('ascii — An ascii description that is lo…'), scanned.stdout);
+  assert.ok(lines.includes('日本語のスキル — 日本語の説明文はとても…'), scanned.stdout);
+});

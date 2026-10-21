@@ -183,16 +183,65 @@ function styles(terminal: Terminal | undefined) {
 function nameLine(skill: Skill, terminal: Terminal | undefined, style: ReturnType<typeof styles>): string {
   const summary = skill.description ? firstSentence(skill.description) : '';
   if (!terminal) return summary ? `${skill.name} — ${summary}` : skill.name;
-  const room = terminal.columns - [...skill.name].length - 3;
+  const room = terminal.columns - columnsOf(skill.name) - 3;
   if (!summary || room < 1) return style.name(fit(skill.name, terminal.columns));
   return `${style.name(skill.name)} — ${fit(summary, room)}`;
 }
 
-/** The text, cut to `width` characters (at least 1) with `…` if longer. */
+/** The text, cut to `width` columns (at least 1) with `…` if wider. */
 function fit(text: string, width: number): string {
-  const characters = [...text];
-  if (characters.length <= width) return text;
-  return `${characters.slice(0, Math.max(width, 1) - 1).join('').trimEnd()}…`;
+  if (columnsOf(text) <= width) return text;
+  let kept = '';
+  let used = 0;
+  for (const { segment } of graphemes.segment(text)) {
+    const columns = graphemeColumns(segment);
+    if (used + columns > Math.max(width, 1) - 1) break;
+    kept += segment;
+    used += columns;
+  }
+  return `${kept.trimEnd()}…`;
+}
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/** The columns a terminal gives the text: 2 for a wide character (CJK, most emoji), 0 for a mark. */
+function columnsOf(text: string): number {
+  let columns = 0;
+  for (const { segment } of graphemes.segment(text)) columns += graphemeColumns(segment);
+  return columns;
+}
+
+function graphemeColumns(grapheme: string): number {
+  if (/\p{Emoji_Presentation}|\p{Extended_Pictographic}\uFE0F|\p{Regional_Indicator}{2}/u.test(grapheme)) return 2;
+  const code = grapheme.codePointAt(0)!;
+  if (/^[\p{Cc}\p{Cf}\p{Mn}\p{Me}]/u.test(grapheme)) return 0;
+  // A halfwidth (semi-)voiced mark, "ﾞ" or "ﾟ", joins the grapheme before it but takes a column of its own.
+  const marks = grapheme.slice(1).match(/[ﾞﾟ]/g)?.length ?? 0;
+  return (isWide(code) ? 2 : 1) + marks;
+}
+
+/** East Asian Wide and Fullwidth (Unicode's EastAsianWidth.txt, W and F), emoji aside. */
+function isWide(code: number): boolean {
+  return (
+    (code >= 0x1100 && code <= 0x115f) || // Hangul Jamo initials
+    (code >= 0x2e80 && code <= 0x303e) || // CJK radicals, Kangxi, ideographic punctuation and space
+    (code >= 0x3041 && code <= 0x33ff) || // Hiragana, Katakana, Bopomofo, Hangul compatibility, CJK symbols
+    (code >= 0x3400 && code <= 0x4dbf) || // CJK Extension A
+    (code >= 0x4e00 && code <= 0x9fff) || // CJK Unified Ideographs
+    (code >= 0xa000 && code <= 0xa4cf) || // Yi
+    (code >= 0xa960 && code <= 0xa97f) || // Hangul Jamo Extended-A
+    (code >= 0xac00 && code <= 0xd7a3) || // Hangul syllables
+    (code >= 0xf900 && code <= 0xfaff) || // CJK compatibility ideographs
+    (code >= 0xfe10 && code <= 0xfe19) || // vertical forms
+    (code >= 0xfe30 && code <= 0xfe6f) || // CJK compatibility forms, small forms
+    (code >= 0xff00 && code <= 0xff60) || // fullwidth forms
+    (code >= 0xffe0 && code <= 0xffe6) || // fullwidth signs
+    (code >= 0x16fe0 && code <= 0x16fe4) || // ideographic symbols
+    (code >= 0x17000 && code <= 0x18aff) || // Tangut
+    (code >= 0x1b000 && code <= 0x1b2ff) || // Kana supplement, extended, Nushu
+    (code >= 0x1f200 && code <= 0x1f251) || // enclosed ideographic supplement
+    (code >= 0x20000 && code <= 0x3fffd) // CJK Extensions B and later
+  );
 }
 
 /**
