@@ -9,6 +9,9 @@ error: `0 of M skills`, exit code 0. Warnings are not filtered. An empty text ke
 `./skill-atlas rules [--defaults]`: the rules file's path and content, or the current defaults.
 `…/tree/<commit | branch | tag>` scans that ref instead of the default branch, always through the
 file tree: code search sees only the default branch. An unknown ref → a clear message, exit code 1.
+No input, or an empty one (`scan ""`, as `scan "$URL"` gives with `URL` unset) → the usage, exit code 1;
+never a scan of the current directory. Anything else that is neither → `Not a GitHub URL or a readable
+directory: <input>`, exit code 1.
 Prints the result **at once**; a scan's result is *never stored*. The only file skill-atlas
 writes is the [rules](rules.md) file, on the first scan.
 `GITHUB_TOKEN`, optional: a higher GitHub rate limit.
