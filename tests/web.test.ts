@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { request as httpRequest } from 'node:http';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
@@ -1204,6 +1205,27 @@ test('POST /api/cluster: JSON only, POST only, its shape, each id once; a model 
   assert.deepEqual(await (await cluster({ skills: [] })).json(), { clusters: [] });
   const large = await cluster({ skills: [{ id: 'a', name: 'a', description: '', body: 'x'.repeat(9 * 1024 * 1024) }] });
   assert.equal(large.status, 413);
+});
+
+test('POST /api/cluster: a character split across two chunks of the request stays whole', async (t) => {
+  const asked = topicsModel(t, [['Docs', ['acme/tools:skills/日本/SKILL.md']]]);
+  const skill = { id: 'acme/tools:skills/日本/SKILL.md', name: '日本', description: 'Über.', body: 'Body.' };
+  const bytes = Buffer.from(JSON.stringify({ skills: [skill] }));
+  const split = bytes.indexOf(Buffer.from('日')) + 1; // inside the character's three bytes
+  const answer = await new Promise<{ status?: number; body: string }>((resolve, reject) => {
+    const request = httpRequest(`${base}api/cluster`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (part) => (body += part));
+      response.on('end', () => resolve({ status: response.statusCode, body }));
+    });
+    request.on('error', reject);
+    request.write(bytes.subarray(0, split));
+    setTimeout(() => request.end(bytes.subarray(split)), 50); // a second chunk, not one merged write
+  });
+  assert.equal(answer.status, 200);
+  assert.deepEqual(JSON.parse(answer.body), { clusters: [{ topic: 'Docs', skills: [skill.id] }] });
+  assert.deepEqual(asked, [[skill]]);
 });
 
 test('POST /api/cluster: a page that goes away drops the question', async (t) => {

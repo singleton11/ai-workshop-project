@@ -126,15 +126,18 @@ async function clusterRequest(request: IncomingMessage, response: ServerResponse
   if (!/^application\/json\s*(;|$)/i.test(request.headers['content-type'] ?? '')) {
     return send(response, 415, { error: 'Send the skills as application/json' });
   }
-  let text = '';
-  for await (const chunk of request) {
-    text += chunk;
-    if (text.length > CLUSTER_LIMIT) {
+  // Bytes first, text once: a character split across two chunks stays whole.
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request as AsyncIterable<Buffer>) {
+    chunks.push(chunk);
+    size += chunk.length;
+    if (size > CLUSTER_LIMIT) {
       response.setHeader('Connection', 'close');
       return send(response, 413, { error: 'Too many skills to cluster at once' });
     }
   }
-  const skills = clusterInputs(text);
+  const skills = clusterInputs(Buffer.concat(chunks).toString('utf8'));
   if (!skills) return send(response, 400, { error: 'Send { skills: [{ id, name, description, body }] }' });
   const gone = new AbortController();
   response.once('close', () => {
