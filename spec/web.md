@@ -69,6 +69,8 @@ It listens on `127.0.0.1` only, and answers 403 to a `Host` other than `localhos
 Clicking a card opens it: the name, the whole description, the link to the `SKILL.md`
 at the scanned commit, the path, *Updated* (the day it last changed, if known), `also in` its
 copies, the other front matter keys, and the body rendered as Markdown. *Back* returns to the catalog.
+The view fits the window, a phone's too (375 px wide): long words in the name and the description
+wrap, and a table or code block wider than the body scrolls sideways in its own box, not the page.
 
 The body comes from someone else's repository: raw HTML in it is shown as text, links other than
 `http(s):`, `mailto:` and relative ones are dropped, and the page allows no inline script.

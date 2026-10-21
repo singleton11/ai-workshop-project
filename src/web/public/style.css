@@ -220,10 +220,11 @@ code { font-family: var(--mono); font-size: 0.9em; }
 
 /* A skill */
 .back { margin-bottom: var(--space-5); }
+.skill-head { overflow-wrap: break-word; } /* a long token in a name or description wraps */
 .skill-head h1 { margin: 0 0 var(--space-2); font-size: 28px; line-height: 1.2; }
 .skill-head .lead { font-size: 16px; margin: 0 0 var(--space-5); color: var(--muted); }
 .skill-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--space-5); align-items: start; }
-@media (max-width: 860px) { .skill-layout { grid-template-columns: 1fr; } }
+@media (max-width: 860px) { .skill-layout { grid-template-columns: minmax(0, 1fr); } } /* 1fr would grow to a wide table or pre */
 
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-5); }
 .meta { margin: 0; display: grid; gap: var(--space-3); }

@@ -3,7 +3,8 @@
 Each demo's key moments are screenshots. Argos compares them with the approved baseline and a
 human approves any difference side by side.
 
-- `partial-scan.spec.ts`, `last-updated.spec.ts`, `nicer-list.spec.ts`, `clustering.spec.ts`: the web demos (Playwright). `shot()` is a key moment.
+- `partial-scan.spec.ts`, `last-updated.spec.ts`, `nicer-list.spec.ts`, `clustering.spec.ts`, `narrow-skill.spec.ts`: the web
+  demos (Playwright). `shot()` is a key moment. `narrow-skill.spec.ts` runs on a phone's screen, 375×667.
 - `cli.tape`, `last-updated.tape`, `nicer-list.tape`, `clustering.tape`: the CLI demos (VHS). `Screenshot` is a key moment.
 - `net.json`: GitHub's answers, replayed by `flaky.mjs`; no network. Recorded without a token.
   Each skill's date is one more answer: `…/commits?sha=<commit>&path=<file>&per_page=1`.
