@@ -22,6 +22,10 @@ process.exitCode = await run(process.argv.slice(2), {
   error: (text) => console.error(text),
   rules,
   cluster,
+  // A terminal gets the list laid out for reading; a pipe or a file, the plain lines. `NO_COLOR`, even empty: no colors.
+  terminal: process.stdout.isTTY
+    ? { columns: process.stdout.columns || 80, color: process.env.NO_COLOR === undefined && process.env.TERM !== 'dumb' }
+    : undefined,
   serve: (port) =>
     listen(
       createWebServer({

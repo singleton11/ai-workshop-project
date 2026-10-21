@@ -670,6 +670,11 @@ test('the page: a pasted URL fills the catalog with a card per skill, sorted, an
   assert.deepEqual(p.texts('.card-date'), ['Updated 2025-11-02', 'Updated 2026-03-14']);
   assert.equal(p.$('[data-skill="acme/tools:.claude/skills/broken/SKILL.md"] .card-date'), null);
   assert.deepEqual(p.all('.card-date time').map((time) => time.getAttribute('datetime')), ['2025-11-02T23:59:59Z', '2026-03-14T09:30:00Z']);
+  // The name and the date on one line; the whole first sentence and path on hover, as they may be cut.
+  assert.deepEqual(p.all('.card-head').map((head) => [...head.children].map((child) => child.className)),
+    [['card-title'], ['card-title', 'card-date'], ['card-title', 'card-date']]);
+  assert.deepEqual(p.all('.card-text').map((text) => text.getAttribute('title')), [null, 'Ship to production.', 'Review pull requests the way this team does.']);
+  assert.deepEqual(p.all('.card-path').map((path) => path.getAttribute('title')), p.texts('.card-path'));
   assert.equal(p.text('#count'), '3 skills');
   assert.deepEqual(p.params(), ['https://github.com/acme/tools']);
   assert.equal((p.$('#scan-url') as HTMLInputElement).value, '');

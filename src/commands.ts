@@ -26,7 +26,12 @@ export type Context = {
   serve?(port: number): Promise<string>;
   /** Asks the model that groups skills by topic; only the Node CLI has one. spec/clustering.md. */
   cluster?: Ask;
+  /** Set when `print` goes to a terminal: the list is laid out for reading there. spec/cli.md. */
+  terminal?: Terminal;
 };
+
+/** A terminal `columns` wide; `color`, unless `NO_COLOR` or `TERM=dumb` say otherwise. */
+export type Terminal = { columns: number; color: boolean };
 
 const usage = `Usage: skill-atlas <command>
 
@@ -113,21 +118,26 @@ function matches(skill: Skill, text: string): boolean {
 
 /**
  * `<owner>/<repo> · N skills` (`N of M skills` when filtered), then each skill's name and first
- * sentence; when it last changed, if that is known, and its link.
+ * sentence; when it last changed, if that is known, and its link. In a terminal, an empty line
+ * before each skill, the line with the name cut to the terminal's width, and colors.
  */
 function printRepository(repository: Repository, skills: Skill[], total: number | undefined, context: Context, topics?: Topic[]) {
+  const { print, terminal } = context;
   const count = total === undefined ? `${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}` : `${skills.length} of ${total} skills`;
-  context.print(`${repository.id} · ${count}`);
+  const style = styles(terminal);
+  print(`${style.bold(repository.id)} ${style.dim(`· ${count}`)}`);
   if (topics) printTopics(topics, context);
   else for (const skill of skills) printSkill(repository, skill, context);
 }
 
 /** Its name and first sentence; when it last changed, if that is known, and its link; its copies. */
-function printSkill(repository: Repository, skill: Skill, { print }: Context) {
-  print(skill.description ? `${skill.name} — ${firstSentence(skill.description)}` : skill.name);
+function printSkill(repository: Repository, skill: Skill, { print, terminal }: Context) {
+  const style = styles(terminal);
+  if (terminal) print('');
+  print(nameLine(skill, terminal, style));
   const day = updatedDay(skill);
-  print(`  ${day ? `updated ${day} · ` : ''}${skillLink(repository, skill)}`);
-  if (skill.copies.length > 0) print(`  also in ${skill.copies.join(', ')}`);
+  print(`  ${style.dim(`${day ? `updated ${day} · ` : ''}${skillLink(repository, skill)}`)}`);
+  if (skill.copies.length > 0) print(`  ${style.dim(`also in ${skill.copies.join(', ')}`)}`);
 }
 
 /** A skill and the repository it is in: an organization's topics mix repositories. */
@@ -156,6 +166,34 @@ function printTopics(topics: Topic[], context: Context) {
   }
 }
 
+const plain = (text: string) => text;
+
+/** ANSI colors in a terminal that has them; elsewhere, the text as it is. */
+function styles(terminal: Terminal | undefined) {
+  if (!terminal?.color) return { bold: plain, dim: plain, name: plain };
+  const sgr = (code: string) => (text: string) => `\x1b[${code}m${text}\x1b[0m`;
+  return { bold: sgr('1'), dim: sgr('2'), name: sgr('1;36') };
+}
+
+/**
+ * `<name> — <first sentence>`, or the name alone without a description. In a terminal, cut to its
+ * width: the sentence first; a name with no room left for any of it, the name alone, cut too.
+ */
+function nameLine(skill: Skill, terminal: Terminal | undefined, style: ReturnType<typeof styles>): string {
+  const summary = skill.description ? firstSentence(skill.description) : '';
+  if (!terminal) return summary ? `${skill.name} — ${summary}` : skill.name;
+  const room = terminal.columns - [...skill.name].length - 3;
+  if (!summary || room < 1) return style.name(fit(skill.name, terminal.columns));
+  return `${style.name(skill.name)} — ${fit(summary, room)}`;
+}
+
+/** The text, cut to `width` characters (at least 1) with `…` if longer. */
+function fit(text: string, width: number): string {
+  const characters = [...text];
+  if (characters.length <= width) return text;
+  return `${characters.slice(0, Math.max(width, 1) - 1).join('').trimEnd()}…`;
+}
+
 /**
  * `<owner> · N skills in M of K repositories`, then each repository with skills, as for one; then
  * `scan incomplete: <owner>/<repo>: <message>` for each repository that stopped partway.
@@ -171,7 +209,8 @@ async function printOrganization(result: OrganizationResult, context: Context, f
   // One set of topics for the whole organization, its repositories mixed.
   const topics = ask && (await topicsOf(repositories.flatMap(({ scanResult, skills }) =>
     skills.map((skill) => ({ repository: scanResult.repository, skill }))), ask));
-  context.print(`${result.owner.id} · ${organizationSummary(skills, repositories.length, result.listed)}`);
+  const style = styles(context.terminal);
+  context.print(`${style.bold(result.owner.id)} ${style.dim(`· ${organizationSummary(skills, repositories.length, result.listed)}`)}`);
   if (topics) printTopics(topics, context);
   else for (const { scanResult, skills } of repositories) {
     context.print('');

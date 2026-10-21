@@ -480,10 +480,12 @@ function renderCard(skill, origin, repository) {
       openedFromCatalog = true;
     } },
     repository && h('span', { class: 'card-repository' }, repository),
-    h('span', { class: 'card-title' }, skill.name),
-    h('span', { class: 'card-text' }, skill.summary || 'No description.'),
-    h('span', { class: 'card-path' }, skill.path),
-    skill.updated && h('span', { class: 'card-date' }, 'Updated ', updated(skill)));
+    h('span', { class: 'card-head' },
+      h('span', { class: 'card-title' }, skill.name),
+      skill.updated && h('span', { class: 'card-date' }, 'Updated ', updated(skill))),
+    // Cut to three lines; the whole first sentence on hover.
+    h('span', { class: 'card-text', title: skill.summary || undefined }, skill.summary || 'No description.'),
+    h('span', { class: 'card-path', title: skill.path }, skill.path));
 }
 
 /** When the skill last changed: the day, in UTC, as the CLI says it; the whole time on hover. @param {Skill} skill */

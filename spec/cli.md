@@ -25,6 +25,13 @@ build-tools-bump-gradle-api — Bumps the Gradle API…
   in UTC; left out when it is not known
 - With `--filter`: `JetBrains/kotlin · 2 of 6 skills`, then only those two
 - `also in <paths>` for identical copies and symbolic links, main path first; warnings go to *stderr*
+- **In a terminal** (stdout is a TTY), the same lines, laid out for reading: an empty line before
+  each skill; the line with the name cut to the terminal's width with `…` (the link line never is,
+  so the link stays whole): the sentence first, and a name with no room left for it alone, cut too
+  if longer than the terminal; the name in bold cyan, the owner or repository in bold, the count, the
+  date, the link and `also in` dimmed. `NO_COLOR` (any value, even empty) or `TERM=dumb`: the layout,
+  no colors.
+  A pipe or a file gets the plain lines above, unchanged, whatever the terminal.
 
 An organization: a first line with the totals, then each repository with skills as above, after an
 empty line. Its warnings are `warning: <owner>/<repo>: <warning>`. A repository that stopped partway
