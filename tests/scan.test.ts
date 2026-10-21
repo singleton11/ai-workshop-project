@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { openGitHub } from '../src/core/github.ts';
 import { parseSkill } from '../src/core/parse.ts';
-import { replay } from '../src/core/replay.ts';
+import { replay, type Recording } from '../src/core/replay.ts';
 import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, history, withoutDates } from './helpers.ts';
 
 const fixture = await atlas(['scan', FIXTURE]);
@@ -145,8 +145,21 @@ test('…/tree/<ref> scans that commit, through the tree even with a token', asy
     'https://api.github.com/repos/JetBrains/example/commits/no-such-branch': { status: 404, body: { message: 'No commit found' } },
   });
   await assert.rejects(openGitHub('github.com/JetBrains/example/tree/no-such-branch', { fetch: missing }), {
-    message: 'Not found in JetBrains/example: no-such-branch',
+    message: 'Branch, tag or commit not found: no-such-branch in https://github.com/JetBrains/example',
   });
+});
+
+test('an unknown ref: GitHub answers 422; a clear message without the API URL, exit code 1', async () => {
+  const recording: Recording = {
+    'https://api.github.com/repos/JetBrains/example/commits/no-such-ref': {
+      status: 422,
+      body: { message: 'No commit found for SHA: no-such-ref' },
+    },
+  };
+  const result = await atlas(['scan', 'https://github.com/JetBrains/example/tree/no-such-ref'], { recording });
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, 'Branch, tag or commit not found: no-such-ref in https://github.com/JetBrains/example');
 });
 
 test('--filter keeps the skills whose name, description or path contains the text, in any letter case', async () => {

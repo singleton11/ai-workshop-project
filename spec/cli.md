@@ -8,7 +8,8 @@ error: `0 of M skills`, exit code 0. Warnings are not filtered. An empty text ke
 [below](#by-topic).
 `./skill-atlas rules [--defaults]`: the rules file's path and content, or the current defaults.
 `…/tree/<commit | branch | tag>` scans that ref instead of the default branch, always through the
-file tree: code search sees only the default branch. An unknown ref → a clear message, exit code 1.
+file tree: code search sees only the default branch. An unknown ref → a clear message, exit code 1:
+`Branch, tag or commit not found: <ref> in https://github.com/<owner>/<repo>`.
 No input, or an empty one (`scan ""`, as `scan "$URL"` gives with `URL` unset) → the usage, exit code 1;
 never a scan of the current directory. Anything else that is neither → `Not a GitHub URL or a readable
 directory: <input>`, exit code 1.
