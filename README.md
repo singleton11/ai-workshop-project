@@ -36,4 +36,6 @@ rewrites the snapshots; review them with `git diff`.
 - [spec/](spec/): what it does. [AGENTS.md](AGENTS.md): the definition of done.
 - [fixture/](fixture/README.md): a small repository for the tests.
 - [.agents/skills/](.agents/skills/): agent skills for working on skill-atlas, such as
-  [record-feature-video](.agents/skills/record-feature-video/SKILL.md), a headless demo video of a feature.
+  [record-feature-video](.agents/skills/record-feature-video/SKILL.md), a headless demo video of a feature,
+  and [red-team](.agents/skills/red-team/SKILL.md), which tries to break the app and files the bugs it
+  finds as GitHub issues.
