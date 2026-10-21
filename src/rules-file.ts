@@ -1,17 +1,22 @@
 // The rules file on disk, for the Node CLI: spec/rules.md. The core never reads or writes it.
 import { link, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { AtlasError } from './core/errors.ts';
 import { DEFAULT_RULES } from './core/rules.ts';
 import type { RulesStore } from './commands.ts';
 
-/** `$SKILL_ATLAS_RULES`, else the user's config folder. */
-function defaultPath(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string {
+/**
+ * `$SKILL_ATLAS_RULES`, else the user's config folder. A relative `$XDG_CONFIG_HOME` or `%APPDATA%`
+ * is ignored, as the XDG spec says; no path at all with no home folder (`HOME=`), never one
+ * relative to the current directory.
+ */
+function defaultPath(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string | undefined {
   if (env.SKILL_ATLAS_RULES) return env.SKILL_ATLAS_RULES;
-  if (platform === 'win32' && env.APPDATA) return join(env.APPDATA, 'skill-atlas', 'rules.yaml');
-  const config = env.XDG_CONFIG_HOME || join(homedir(), '.config');
-  return join(config, 'skill-atlas', 'rules.yaml');
+  if (platform === 'win32' && env.APPDATA && isAbsolute(env.APPDATA)) return join(env.APPDATA, 'skill-atlas', 'rules.yaml');
+  if (env.XDG_CONFIG_HOME && isAbsolute(env.XDG_CONFIG_HOME)) return join(env.XDG_CONFIG_HOME, 'skill-atlas', 'rules.yaml');
+  const home = homedir();
+  return isAbsolute(home) ? join(home, '.config', 'skill-atlas', 'rules.yaml') : undefined;
 }
 
 export function rulesFile(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): RulesStore {
@@ -23,6 +28,10 @@ export function rulesFile(env: NodeJS.ProcessEnv = process.env, platform: NodeJS
         return { path: explicit, text };
       }
       const path = defaultPath(env, platform);
+      if (!path) {
+        note('warning: cannot write the rules: no home folder (set HOME or SKILL_ATLAS_RULES); using the defaults');
+        return { path: '<default rules>', text: DEFAULT_RULES };
+      }
       const existing = await read(path);
       if (existing !== undefined) return { path, text: existing };
       try {
@@ -35,7 +44,7 @@ export function rulesFile(env: NodeJS.ProcessEnv = process.env, platform: NodeJS
     },
     async peek() {
       const path = defaultPath(env, platform);
-      return { path, text: await read(path) };
+      return path ? { path, text: await read(path) } : {};
     },
   };
 }

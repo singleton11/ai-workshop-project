@@ -1,13 +1,14 @@
 // spec/rules.md: the rules file, created on the first scan, then the user's to edit.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { createBrowserBackend } from '../src/browser.ts';
 import { DEFAULT_RULES } from '../src/core/rules.ts';
 import { rulesFile } from '../src/rules-file.ts';
-import { atlas, FIXTURE, found, OWN_SKILLS } from './helpers.ts';
+import { atlas, CLI, FIXTURE, found, OWN_SKILLS, withoutDates } from './helpers.ts';
 
 const ROOT = join(FIXTURE, '..');
 
@@ -70,6 +71,38 @@ test('rules that cannot be written: a warning, and the scan uses the defaults', 
   assert.equal(result.code, 0);
   assert.match(result.stderr, /^warning: cannot write the rules to .*rules\.yaml \(.*\); using the defaults\n/);
   assert.equal(result.stdout, (await atlas(['scan', FIXTURE])).stdout);
+});
+
+test('a relative $XDG_CONFIG_HOME or %APPDATA% is ignored: ~/.config, never the current directory', async () => {
+  const home = join(homedir(), '.config', 'skill-atlas', 'rules.yaml');
+  assert.equal((await rulesFile({ XDG_CONFIG_HOME: 'relcfg' }, 'linux').peek()).path, home);
+  assert.equal((await rulesFile({ APPDATA: 'relcfg' }, 'win32').peek()).path, home);
+});
+
+/** The real CLI, run from a fresh folder `cwd` with `env` over this process's environment, without the rules variables. */
+function scanFrom(t: TestContext, env: NodeJS.ProcessEnv, args = ['scan', FIXTURE]) {
+  const cwd = mkdtempSync(join(tmpdir(), 'skill-atlas-cwd-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const environment = { ...process.env, ...env };
+  delete environment.SKILL_ATLAS_RULES;
+  if (!('XDG_CONFIG_HOME' in env)) delete environment.XDG_CONFIG_HOME;
+  return { cwd, ...spawnSync(process.execPath, [CLI, ...args], { cwd, env: environment, encoding: 'utf8' }) };
+}
+
+test('no home (HOME=): a warning, the scan uses the defaults, and nothing is written', { skip: process.platform === 'win32' }, async (t) => {
+  const defaults = await atlas(['scan', FIXTURE]);
+  for (const env of [{ HOME: '' }, { HOME: '', XDG_CONFIG_HOME: 'relcfg' }]) {
+    const scanned = scanFrom(t, env);
+    assert.equal(scanned.status, 0, scanned.stderr);
+    assert.equal(scanned.stderr.split('\n')[0], 'warning: cannot write the rules: no home folder (set HOME or SKILL_ATLAS_RULES); using the defaults');
+    assert.doesNotMatch(scanned.stderr, /created/);
+    assert.equal(withoutDates(scanned.stdout), `${withoutDates(defaults.stdout)}\n`);
+    assert.deepEqual(readdirSync(scanned.cwd), []);
+  }
+  const rules = scanFrom(t, { HOME: '' }, ['rules']);
+  assert.equal(rules.status, 0, rules.stderr);
+  assert.equal(rules.stdout, `# the default rules; they cannot be changed here\n${DEFAULT_RULES}`);
+  assert.deepEqual(readdirSync(rules.cwd), []);
 });
 
 test('--rules: this file for this run; a missing one is an error, and is not created', async (t) => {
