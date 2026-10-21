@@ -33,6 +33,10 @@ export default defineConfig({
       DROP_FILE: `${DIR}/results/drop-after`,
       SKILL_ATLAS_RULES: `${DIR}/rules.yaml`,
       GITHUB_TOKEN: '',
+      // The model's answer for anthropics/skills, replayed, after a model's pause: claude.json.
+      SKILL_ATLAS_CLAUDE: `${DIR}/../../.agents/skills/record-feature-video/scripts/claude.mjs`,
+      CLAUDE_REPLAY: `${DIR}/claude.json`,
+      CLAUDE_DELAY_MS: '1500',
     },
   },
 });

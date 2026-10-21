@@ -126,6 +126,9 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .alert-warn ul { margin: var(--space-2) 0 0; padding-left: var(--space-5); font-family: var(--mono); font-size: 12px; }
 
 .toolbar { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-5); }
+.toolbar #group { margin-left: auto; }
+.button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+#group-error { margin: 0 0 var(--space-5); }
 .input-search { max-width: 420px; }
 
 .empty { text-align: center; padding: 64px var(--space-4); border: 1px dashed var(--border); border-radius: var(--radius); }
@@ -145,6 +148,7 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .organization-head { padding-bottom: var(--space-3); border-bottom: 1px solid var(--border); margin-bottom: var(--space-5); }
 .organization-name { font-size: 20px; }
 .organization .repository { margin-left: var(--space-4); }
+.topic { margin-bottom: var(--space-6); }
 
 .badge {
   display: inline-block;
@@ -176,6 +180,7 @@ code { font-family: var(--mono); font-size: 0.9em; }
   transition: box-shadow 0.15s, border-color 0.15s, transform 0.15s;
 }
 .card:hover, .card:focus-visible { border-color: var(--accent); box-shadow: var(--shadow-hover); transform: translateY(-1px); outline: none; }
+.card-repository { font-size: 12px; font-weight: 600; color: var(--accent); }
 /* The date beside the name; under it, kept to the right, when the name needs the room. */
 .card-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); }
 .card-title { flex: 1 1 auto; min-width: 0; font-weight: 650; font-size: 15px; overflow-wrap: anywhere; }
