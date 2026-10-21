@@ -1,12 +1,12 @@
 // One adversarial probe of the web catalog, headless: runs a steps file against a page and keeps
 // everything a bug report needs. Usage:
-//   node probe.mjs <url> <steps.mjs> <out-dir>
+//   node probe.mjs <url> <steps.mjs> <out-dir>   (a new, empty directory per attempt)
 // steps.mjs: `export default async ({ page, shot, note }) => { … }`
 //   shot(name)  → <out-dir>/<name>.png
 //   note(text)  → a line in <out-dir>/log.txt (what you did, what you saw)
 // Always written, passing or failing: log.txt (with console errors, page errors, failed and 4xx/5xx
 // requests), aria.txt (the page's accessibility tree at the end), final.png and video.webm.
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium } from '@playwright/test';
@@ -18,6 +18,11 @@ if (!url || !stepsFile || !outArg) {
 }
 const out = resolve(outArg);
 mkdirSync(out, { recursive: true });
+if (readdirSync(out).length > 0) {
+  // Each attempt keeps its own evidence: never overwrite an earlier run's log, captures or video.
+  console.error(`probe.mjs: ${out} is not empty; use a new directory (e.g. attempt-2)`);
+  process.exit(2);
+}
 
 const log = [];
 const note = (text) => { log.push(text); console.log(text); };
